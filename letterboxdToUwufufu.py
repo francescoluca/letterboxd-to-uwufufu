@@ -6,10 +6,27 @@ import os
 import sys
 import getpass
 from dotenv import load_dotenv
-
 load_dotenv() 
 
 api_key = os.getenv("API_KEY")
+
+def get_movie_poster(title, year):
+    api_response = requests.get("https://www.omdbapi.com/",params={"apikey": api_key, "t": title, "y": year})        
+    data = api_response.json()
+    if data.get("Response") == "True":
+        return data.get("Poster")
+    api_response = requests.get(
+        "https://www.omdbapi.com/",
+        params={"apikey": api_key, "t": title},
+        timeout=10
+    )
+    data = api_response.json()
+    if data.get("Response") == "True":
+        print(f"  [Info] Found '{title}' by title only (ignoring year mismatch)")
+        return data.get("Poster")
+
+    return "N/A"
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("file", help="CSV path file")
@@ -50,10 +67,8 @@ with open(args.file) as f:
     next(reader)    #to skip header
     for row in reader:
         title = row[1]
-        api_response = requests.get("https://www.omdbapi.com/",params={"apikey": api_key, "t": title})        
-        movie_data = api_response.json()
-
-        poster = movie_data.get("Poster", "N/A")
+        year = row[2]
+        poster = get_movie_poster(title=title,year=year)
         if poster != "N/A":
             poster_high_res = poster.split("._V1_")[0] + "._V1_QL75_UX1000_.jpg"
             movies.append({"title": title, "poster_url": poster_high_res})
@@ -74,7 +89,7 @@ upload_url = "https://api.uwufufu.com/v1/selections/image"
 for movie in movies:
     title = movie["title"]
     poster_url = movie["poster_url"]
-    print(f"Caricamento di: {title}...")
+    print(f"Uploading: {title}...")
     img_response = requests.get(poster_url)
 
     payload_data = {
@@ -93,3 +108,5 @@ for movie in movies:
         data=payload_data, 
         files=payload_files
     )
+
+print("\nProcess completed successfully!")
