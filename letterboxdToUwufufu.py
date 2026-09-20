@@ -55,7 +55,8 @@ with open(args.file) as f:
 
         poster = movie_data.get("Poster", "N/A")
         if poster != "N/A":
-            movies.append({"title": title, "poster_url": poster})
+            poster_high_res = poster.split("._V1_")[0] + "._V1_QL75_UX1000_.jpg"
+            movies.append({"title": title, "poster_url": poster_high_res})
         else:
             print(f" Poster not found for: {title}")        
         time.sleep(0.2)
