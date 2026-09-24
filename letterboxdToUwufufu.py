@@ -52,12 +52,20 @@ def authenticate_uwufufu(email, password):
         sys.exit(1)
 
 def main():
+    global API_KEY
     parser = argparse.ArgumentParser()
     parser.add_argument("file", help="CSV path file")
     args = parser.parse_args()
     if not API_KEY:
-        print("Error: API_KEY not found in environment variables. Please check your .env file.")
-        sys.exit(1)
+        input_api_key = input("Error: API_KEY not found in environment variables. Insert here: ")
+        api_check = requests.get(f"http://www.omdbapi.com/?apikey={input_api_key}&")
+        if((api_check.json().get("Error"))=="Invalid API key!"):
+            print("Error: Invalid API KEY. If you don't have one get one at omdbapi.com")
+            sys.exit(1)
+        with open(".env", "w") as f:
+            f.write(f"API_KEY={input_api_key}")
+        load_dotenv()
+        API_KEY = os.getenv("API_KEY")
     movies = []
     email = input("Your Uwufufu account email: ")
     password = getpass.getpass("Your UwUFUFU account password: ")

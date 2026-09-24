@@ -30,20 +30,6 @@ An open-source Python tool that automatically converts your Letterboxd watched m
    pip install requests python-dotenv
    ```
 
-3. Configure environment variables:
-
-   Duplicate `.env.example` and rename it to `.env`:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Open the `.env` file and insert your OMDb API key:
-
-   ```env
-   API_KEY=your_omdb_api_key_here
-   ```
-
 ## Usage
 
 1. Export your watched movies from Letterboxd (Settings -> Data -> Export your data).
