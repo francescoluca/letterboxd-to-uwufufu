@@ -73,17 +73,22 @@ def main():
 
     with open(args.file) as f:
         reader = csv.reader(f)
-        next(reader)    #to skip header
+        reading_movies = False
         for row in reader:
-            title = row[1]
-            year = row[2]
-            poster = get_movie_poster(title=title,year=year)
-            if poster != "N/A":
-                poster_high_res = poster.split("._V1_")[0] + "._V1_QL75_UX1000_.jpg"
-                movies.append({"title": title, "poster_url": poster_high_res})
-            else:
-                print(f" Poster not found for: {title}")        
-            time.sleep(0.2)
+            #Movies start after the row containing Year. Csvs from list have a different structure from watched or watchlist csvs.
+            if "Year" in row:   
+                reading_movies = True
+                continue
+            if(reading_movies):
+                title = row[1]
+                year = row[2]
+                poster = get_movie_poster(title=title,year=year)
+                if poster != "N/A":
+                    poster_high_res = poster.split("._V1_")[0] + "._V1_QL75_UX1000_.jpg"
+                    movies.append({"title": title, "poster_url": poster_high_res})
+                else:
+                    print(f" Poster not found for: {title}")        
+                time.sleep(0.2)
 
 
     headers = {"Authorization": f"Bearer {accessToken}"}
