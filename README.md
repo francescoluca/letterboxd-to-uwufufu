@@ -39,10 +39,9 @@ An open-source Python tool that automatically converts your Letterboxd watched m
    ```bash
    python letterboxdToUwufufu.py path/to/watched.csv
    ```
+3. Enter your OMDb API key (if not already configured) and your UwUFUFU credentials securely when prompted.
 
-3. Enter your UwUFUFU email and password securely when prompted.
-
-4. Once completed, head over to UwUFUFU, find your newly created draft tournament, and publish it!
+5. Once completed, head over to UwUFUFU, find your newly created draft tournament, and publish it!
 
 ## Find a bug?
 
