@@ -32,12 +32,13 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 ## Usage
 
-1. Export your watched movies from Letterboxd (Settings -> Data -> Export your data).
+1. Export your watched movies, watchlist, or a custom movie list from Letterboxd. 
+   You have everything in the zip file you get from here -> (Settings -> Data -> Export your data).
 
 2. Run the script passing the path to your CSV file:
 
    ```bash
-   python letterboxdToUwufufu.py path/to/watched.csv
+   python letterboxdToUwufufu.py path/to/your_list.csv
    ```
 3. Enter your OMDb API key (if not already configured) and your UwUFUFU credentials securely when prompted.
 
