@@ -27,7 +27,7 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 2. Install dependencies:
 
    ```bash
-   pip install requests python-dotenv
+   pip install -r requirements.txt
    ```
 
 ## Usage
@@ -38,7 +38,7 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 2. Run the script passing the path to your CSV file:
 
    ```bash
-   python letterboxdToUwufufu.py path/to/your_list.csv
+   python main.py path/to/your_list.csv
    ```
 3. Enter your OMDb API key (if not already configured) and your UwUFUFU credentials securely when prompted.
 
