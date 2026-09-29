@@ -6,7 +6,7 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 * Letterboxd Parser: Reads standard Letterboxd exported CSV files (such as `watched.csv`). You can use any custom CSV file as long as it follows the format, requiring the movie title and release year.
 * Smart OMDb Integration: Fetches high-resolution movie posters with a built-in year-tolerance fallback mechanism to prevent mismatches.
-* Secure Auth: Automatically logs into your UwUFUFU account using secure terminal input (getpass).
+* Secure Auth: Securely logs into your UwUFUFU account to create private draft tournaments and bulk-upload movie posters via multipart/form-data.
 * Automated Injector: Creates a private draft worldcup and bulk-uploads all movie posters via multipart/form-data.
 
 ## Prerequisites
