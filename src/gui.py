@@ -22,7 +22,11 @@ class LetterboxdToUwufufuApp:
 
         self.file_entry = tk.Entry(frame_csv, width=48, font=("Arial", 9))
         self.file_entry.pack(side="left", padx=(10, 5), pady=5)
-        
+
+        existing_file_entry = os.getenv("csv_path")
+        if existing_file_entry:
+            self.file_entry.insert(0, existing_file_entry)
+
         browse_btn = tk.Button(frame_csv, text="Browse...", command=self.browse_file, width=10, bg="#e2e3e5", relief="groove")
         browse_btn.pack(side="left", padx=5, pady=5)
 
@@ -43,9 +47,17 @@ class LetterboxdToUwufufuApp:
         self.email_entry = tk.Entry(frame_auth, width=45, font=("Arial", 9))
         self.email_entry.grid(row=0, column=1, padx=5, pady=2)
 
+        existing_email = os.getenv("email")
+        if existing_email:
+            self.email_entry.insert(0, existing_email)
+
         tk.Label(frame_auth, text="Password:", bg="#f8f9fa", font=("Arial", 9)).grid(row=1, column=0, sticky="w", padx=10, pady=2)
         self.pass_entry = tk.Entry(frame_auth, width=45, font=("Arial", 9), show="*")
         self.pass_entry.grid(row=1, column=1, padx=5, pady=2)
+
+        existing_password = os.getenv("password")
+        if existing_password:
+            self.pass_entry.insert(0, existing_password)
 
         self.start_btn = tk.Button(
             root, text="START CONVERSION", bg="#28a745", fg="white", 
@@ -86,6 +98,9 @@ class LetterboxdToUwufufuApp:
 
         with open(".env", "w") as f:
             f.write(f"API_KEY={api_key}\n")
+            f.write(f"email={email}\n")
+            f.write(f"password={password}\n")
+            f.write(f"csv_path={csv_path}\n")
 
         threading.Thread(
             target=self.run_conversion, 
