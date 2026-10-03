@@ -3,10 +3,11 @@ import time
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
+from pathlib import Path
 from dotenv import load_dotenv
 from src import tmdb, uwufufu, parser
-
-load_dotenv()
+CONFIG_FILE = Path.home() / ".uwufufu_converter.env"
+load_dotenv(CONFIG_FILE)
 
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
@@ -85,7 +86,7 @@ class LetterboxdToUwufufuApp:
         self.start_btn.config(state=tk.DISABLED, bg="#6c757d")
         self.log_area.delete("1.0", tk.END)
 
-        with open(".env", "w") as f:
+        with open(CONFIG_FILE, "w") as f:
             f.write(f"email={email}\n")
             f.write(f"password={password}\n")
             f.write(f"csv_path={csv_path}\n")
