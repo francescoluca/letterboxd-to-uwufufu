@@ -6,11 +6,22 @@ from tkinter import filedialog, messagebox, scrolledtext
 from pathlib import Path
 from dotenv import load_dotenv
 from src import tmdb, uwufufu, parser
+from cryptography.fernet import Fernet
+from src.config import ENCRYPTION_KEY
+
 CONFIG_FILE = Path.home() / ".uwufufu_converter.env"
 load_dotenv(CONFIG_FILE)
+cipher = Fernet(ENCRYPTION_KEY)
 
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
+        existing_password = os.getenv("password")
+        if existing_password:
+            try:
+                decrypted_password = cipher.decrypt(existing_password.encode()).decode()
+                self.pass_entry.insert(0, decrypted_password)
+            except Exception:
+                pass
         self.root = root
         self.root.title("Letterboxd to UwUFUFU Converter")
         self.root.geometry("560x520")
@@ -86,9 +97,11 @@ class LetterboxdToUwufufuApp:
         self.start_btn.config(state=tk.DISABLED, bg="#6c757d")
         self.log_area.delete("1.0", tk.END)
 
+        encrypted_password = cipher.encrypt(password.encode()).decode()
+
         with open(CONFIG_FILE, "w") as f:
             f.write(f"email={email}\n")
-            f.write(f"password={password}\n")
+            f.write(f"password={encrypted_password}\n")
             f.write(f"csv_path={csv_path}\n")
 
         threading.Thread(
