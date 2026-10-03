@@ -15,13 +15,6 @@ cipher = Fernet(ENCRYPTION_KEY)
 
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
-        existing_password = os.getenv("password")
-        if existing_password:
-            try:
-                decrypted_password = cipher.decrypt(existing_password.encode()).decode()
-                self.pass_entry.insert(0, decrypted_password)
-            except Exception:
-                pass
         self.root = root
         self.root.title("Letterboxd to UwUFUFU Converter")
         self.root.geometry("560x520")
@@ -59,8 +52,11 @@ class LetterboxdToUwufufuApp:
 
         existing_password = os.getenv("password")
         if existing_password:
-            self.pass_entry.insert(0, existing_password)
-
+            try:
+                decrypted_password = cipher.decrypt(existing_password.encode()).decode()
+                self.pass_entry.insert(0, decrypted_password)
+            except Exception:
+                pass
         self.start_btn = tk.Button(
             root, text="START CONVERSION", bg="#28a745", fg="white", 
             font=("Arial", 10, "bold"), command=self.start_process, height=2
