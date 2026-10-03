@@ -4,8 +4,9 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 ## Features
 
-* **Smart OMDb Integration:** Fetches high-resolution movie posters with a built-in year-tolerance fallback mechanism to prevent mismatches.
+* **Zero-Setup Executable:** The standalone executable comes pre-configured. Just select your CSV, log in to UwUFUFU, and start the conversion. No API keys required!
 * **Letterboxd Parser:** Reads standard Letterboxd exported CSV files, automatically adapting to different structures (watched logs, watchlists, and custom lists).
+* **Smart TMDb Integration:** Migrated to The Movie Database (TMDb) for faster response times, broader catalog coverage, and original high-resolution posters.
 * **Secure Auth & Upload:** Securely logs into your UwUFUFU account to create private draft tournaments and bulk-upload movie posters.
 
 
@@ -17,8 +18,7 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 3. Double-click to launch the application.
 
 ### Option B: Run from Source Code
-If you want to run or modify the source code locally:
-
+If you want to run or modify the source code locally, you will need your own TMDb API key.
 1. Clone the repository:
 
    ```bash
@@ -26,13 +26,19 @@ If you want to run or modify the source code locally:
    cd letterboxd-to-uwufufu
    ```
 
-2. Install dependencies:
+2. Set up your environment and install dependencies:
 
    ```bash
+   python3 -m venv venv
+   source venv/bin/activate
    pip install -r requirements.txt
    ```
-
-2. Run the application:
+3. Configure your TMDb API Key. Create a file named config.py inside the src/ directory and add your v3 API key:
+   ```bash
+   # src/config.py
+   TMDB_API_KEY = "your_api_key"
+   ```
+4. Run the application:
 
    ```bash
    python main.py
@@ -52,4 +58,4 @@ This tool is a personal open-source side-project. It is not affiliated with, end
 
 ## License
 
-Distributed under the MIT License. See LICENSE for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.

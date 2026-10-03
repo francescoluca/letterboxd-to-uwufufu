@@ -124,8 +124,7 @@ class LetterboxdToUwufufuApp:
                 
                 poster = tmdb.get_movie_poster(title, year)
                 if poster != "N/A":
-                    poster_high_res = poster.split("._V1_")[0] + "._V1_QL75_UX1000_.jpg"
-                    movies_with_posters.append({"title": title, "poster_url": poster_high_res})
+                    movies_with_posters.append({"title": title, "poster_url": poster})
                     self.log(f"  [OK] {title} ({year})")
                 else:
                     self.log(f"  [!] Poster not found for: {title}")
