@@ -4,19 +4,21 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 ## Features
 
-* Letterboxd Parser: Reads standard Letterboxd exported CSV files (such as `watched.csv`). You can use any custom CSV file as long as it follows the format, requiring the movie title and release year.
-* Smart OMDb Integration: Fetches high-resolution movie posters with a built-in year-tolerance fallback mechanism to prevent mismatches.
-* Secure Auth: Automatically logs into your UwUFUFU account using secure terminal input (getpass).
-* Automated Injector: Creates a private draft worldcup and bulk-uploads all movie posters via multipart/form-data.
+* **Zero-Setup Executable:** The standalone executable comes pre-configured. Just select your CSV, log in to UwUFUFU, and start the conversion. No API keys required!
+* **Letterboxd Parser:** Reads standard Letterboxd exported CSV files, automatically adapting to different structures (watched logs, watchlists, and custom lists).
+* **Smart TMDb Integration:** Migrated to The Movie Database (TMDb) for faster response times, broader catalog coverage, and original high-resolution posters.
+* **Secure Auth & Upload:** Securely logs into your UwUFUFU account to create private draft tournaments and bulk-upload movie posters.
 
-## Prerequisites
 
-* Python 3.8+
-* An OMDb API Key (get a free one at omdbapi.com)
-* A registered UwUFUFU account
+## Installation & Usage (Desktop GUI)
 
-## Installation
+### Option A: Use the Pre-built Executable (Recommended)
+1. Head over to the **Releases** section of this repository.
+2. Download the latest executable file.
+3. Double-click to launch the application.
 
+### Option B: Run from Source Code
+If you want to run or modify the source code locally, you will need your own TMDb API key.
 1. Clone the repository:
 
    ```bash
@@ -24,25 +26,27 @@ An open-source Python tool that automatically converts your Letterboxd watched m
    cd letterboxd-to-uwufufu
    ```
 
-2. Install dependencies:
+2. Set up your environment and install dependencies:
 
    ```bash
+   python3 -m venv venv
+   source venv/bin/activate
    pip install -r requirements.txt
    ```
-
-## Usage
-
-1. Export your watched movies, watchlist, or a custom movie list from Letterboxd. 
-   You have everything in the zip file you get from here -> (Settings -> Data -> Export your data).
-
-2. Run the script passing the path to your CSV file:
+3. Configure your TMDb API Key. Create a file named config.py inside the src/ directory and add your v3 API key:
+   ```bash
+   # src/config.py
+   TMDB_API_KEY = "your_api_key"
+   ```
+4. Run the application:
 
    ```bash
-   python main.py path/to/your_list.csv
+   python main.py
    ```
-3. Enter your OMDb API key (if not already configured) and your UwUFUFU credentials securely when prompted.
+   
+## Looking for the CLI version?
 
-5. Once completed, head over to UwUFUFU, find your newly created draft tournament, and publish it!
+If you prefer using the command-line interface (CLI) version of this tool, please check out **v0.1.0** under the **Releases** section of this repository.
 
 ## Find a bug?
 
@@ -54,4 +58,4 @@ This tool is a personal open-source side-project. It is not affiliated with, end
 
 ## License
 
-Distributed under the MIT License. See LICENSE for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
