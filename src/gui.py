@@ -2,81 +2,153 @@ import os
 import time
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from pathlib import Path
+
 from dotenv import load_dotenv
-from src import tmdb, uwufufu, parser
 from cryptography.fernet import Fernet
+
+from src import tmdb, uwufufu, parser
 from src.config import ENCRYPTION_KEY
+
 
 CONFIG_FILE = Path.home() / ".uwufufu_converter.env"
 load_dotenv(CONFIG_FILE)
 cipher = Fernet(ENCRYPTION_KEY)
 
+
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Letterboxd to UwUFUFU Converter")
-        self.root.geometry("560x520")
+        self.root.geometry("560x550")
         self.root.resizable(False, False)
-
         self.root.configure(bg="#f8f9fa")
 
-        frame_csv = tk.LabelFrame(root, text=" 1. Letterboxd CSV ", bg="#f8f9fa", font=("Arial", 9, "bold"))
-        frame_csv.pack(fill="x", padx=15, pady=(15, 5), ipady=5)
+        self._build_csv_section()
+        self._build_auth_section()
+        self._build_controls()
+        self._build_log_section()
 
-        self.file_entry = tk.Entry(frame_csv, width=48, font=("Arial", 9))
+    def _build_csv_section(self):
+        frame = tk.LabelFrame(
+            self.root,
+            text=" 1. Letterboxd CSV ",
+            bg="#f8f9fa",
+            font=("Arial", 9, "bold")
+        )
+        frame.pack(fill="x", padx=15, pady=(15, 5), ipady=5)
+
+        self.file_entry = tk.Entry(frame, width=48, font=("Arial", 9))
         self.file_entry.pack(side="left", padx=(10, 5), pady=5)
 
-        existing_file_entry = os.getenv("csv_path")
-        if existing_file_entry:
-            self.file_entry.insert(0, existing_file_entry)
+        if path := os.getenv("csv_path"):
+            self.file_entry.insert(0, path)
 
-        browse_btn = tk.Button(frame_csv, text="Browse...", command=self.browse_file, width=10, bg="#e2e3e5", relief="groove")
-        browse_btn.pack(side="left", padx=5, pady=5)
+        tk.Button(
+            frame,
+            text="Browse...",
+            command=self.browse_file,
+            width=10,
+            bg="#e2e3e5",
+            relief="groove"
+        ).pack(side="left", padx=5, pady=5)
 
-        frame_auth = tk.LabelFrame(root, text=" 2. UwUFUFU Credentials ", bg="#f8f9fa", font=("Arial", 9, "bold"))
-        frame_auth.pack(fill="x", padx=15, pady=5, ipady=5)
+    def _build_auth_section(self):
+        frame = tk.LabelFrame(
+            self.root,
+            text=" 2. UwUFUFU Credentials ",
+            bg="#f8f9fa",
+            font=("Arial", 9, "bold")
+        )
+        frame.pack(fill="x", padx=15, pady=5, ipady=5)
 
-        tk.Label(frame_auth, text="Email:", bg="#f8f9fa", font=("Arial", 9)).grid(row=0, column=0, sticky="w", padx=10, pady=2)
-        self.email_entry = tk.Entry(frame_auth, width=45, font=("Arial", 9))
+        tk.Label(frame, text="Email:", bg="#f8f9fa").grid(
+            row=0, column=0, sticky="w", padx=10, pady=2
+        )
+
+        self.email_entry = tk.Entry(frame, width=45)
         self.email_entry.grid(row=0, column=1, padx=5, pady=2)
 
-        existing_email = os.getenv("email")
-        if existing_email:
-            self.email_entry.insert(0, existing_email)
+        if email := os.getenv("email"):
+            self.email_entry.insert(0, email)
 
-        tk.Label(frame_auth, text="Password:", bg="#f8f9fa", font=("Arial", 9)).grid(row=1, column=0, sticky="w", padx=10, pady=2)
-        self.pass_entry = tk.Entry(frame_auth, width=45, font=("Arial", 9), show="*")
+        tk.Label(frame, text="Password:", bg="#f8f9fa").grid(
+            row=1, column=0, sticky="w", padx=10, pady=2
+        )
+
+        self.pass_entry = tk.Entry(frame, width=45, show="*")
         self.pass_entry.grid(row=1, column=1, padx=5, pady=2)
 
-        existing_password = os.getenv("password")
-        if existing_password:
+        if encrypted := os.getenv("password"):
             try:
-                decrypted_password = cipher.decrypt(existing_password.encode()).decode()
-                self.pass_entry.insert(0, decrypted_password)
+                self.pass_entry.insert(
+                    0,
+                    cipher.decrypt(encrypted.encode()).decode()
+                )
             except Exception:
                 pass
+
+    def _build_controls(self):
         self.start_btn = tk.Button(
-            root, text="START CONVERSION", bg="#28a745", fg="white", 
-            font=("Arial", 10, "bold"), command=self.start_process, height=2
+            self.root,
+            text="START CONVERSION",
+            bg="#28a745",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            command=self.start_process,
+            height=2
         )
-        self.start_btn.pack(fill="x", padx=15, pady=10)
+        self.start_btn.pack(fill="x", padx=15, pady=(10, 5))
 
-        frame_log = tk.LabelFrame(root, text=" Execution Log ", bg="#f8f9fa", font=("Arial", 9, "bold"))
-        frame_log.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        self.progress = ttk.Progressbar(
+            self.root,
+            mode="determinate",
+            maximum=100
+        )
+        self.progress.pack(fill="x", padx=15, pady=(0, 10))
 
-        self.log_area = scrolledtext.ScrolledText(frame_log, width=66, height=9, font=("Consolas", 8), bg="#ffffff")
+    def _build_log_section(self):
+        frame = tk.LabelFrame(
+            self.root,
+            text=" Execution Log ",
+            bg="#f8f9fa",
+            font=("Arial", 9, "bold")
+        )
+        frame.pack(
+            fill="both",
+            expand=True,
+            padx=15,
+            pady=(0, 15)
+        )
+
+        self.log_area = scrolledtext.ScrolledText(
+            frame,
+            width=66,
+            height=9,
+            font=("Consolas", 8),
+            bg="#ffffff"
+        )
         self.log_area.pack(fill="both", expand=True, padx=5, pady=5)
 
     def log(self, message):
-        def append_log():
-            self.log_area.insert(tk.END, message + "\n")
-            self.log_area.see(tk.END)
-        self.root.after(0, append_log)
+        self.root.after(0, lambda: self._append_log(message))
+
+    def _append_log(self, message):
+        self.log_area.insert(tk.END, message + "\n")
+        self.log_area.see(tk.END)
+
+    def set_progress(self, value):
+        self.root.after(0, lambda: self.progress.configure(value=value))
 
     def browse_file(self):
-        filename = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")])
+        filename = filedialog.askopenfilename(
+            filetypes=[
+                ("CSV Files", "*.csv"),
+                ("All Files", "*.*")
+            ]
+        )
+
         if filename:
             self.file_entry.delete(0, tk.END)
             self.file_entry.insert(0, filename)
@@ -86,79 +158,151 @@ class LetterboxdToUwufufuApp:
         email = self.email_entry.get().strip()
         password = self.pass_entry.get().strip()
 
-        if not csv_path or not email or not password:
-            messagebox.showerror("Missing Fields", "Please fill in all fields (CSV file, Email, and Password).")
+        if not all((csv_path, email, password)):
+            messagebox.showerror(
+                "Missing Fields",
+                "Please fill in all fields (CSV file, Email, and Password)."
+            )
             return
 
         self.start_btn.config(state=tk.DISABLED, bg="#6c757d")
+        self.progress["value"] = 0
         self.log_area.delete("1.0", tk.END)
 
         encrypted_password = cipher.encrypt(password.encode()).decode()
 
-        with open(CONFIG_FILE, "w") as f:
-            f.write(f"email={email}\n")
-            f.write(f"password={encrypted_password}\n")
-            f.write(f"csv_path={csv_path}\n")
+        CONFIG_FILE.write_text(
+            f"email={email}\n"
+            f"password={encrypted_password}\n"
+            f"csv_path={csv_path}\n"
+        )
 
         threading.Thread(
-            target=self.run_conversion, 
-            args=(csv_path, email, password), 
+            target=self.run_conversion,
+            args=(csv_path, email, password),
             daemon=True
         ).start()
 
     def run_conversion(self, csv_path, email, password):
         try:
+            # 1. API key
             self.log("Verifying API Key...")
             if not tmdb.validate_api_key():
                 self.log("Error: Invalid API Key.")
-                messagebox.showerror("API Error", "The API key provided is invalid.")
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "API Error",
+                        "The API key provided is invalid."
+                    )
+                )
                 return
+            self.set_progress(10)
 
+            # 2. Authentication
             self.log("Authenticating to UwUFUFU...")
             access_token = uwufufu.authenticate(email, password)
             if not access_token:
                 return
+            self.set_progress(20)
 
-            self.log(f"Reading movies from CSV: {os.path.basename(csv_path)}...")
+            # 3. Read CSV
+            self.log(
+                f"Reading movies from CSV: {os.path.basename(csv_path)}..."
+            )
             raw_movies = parser.extract_movies(csv_path)
+
             if not raw_movies:
                 self.log("Error: No valid movies found in the selected CSV.")
                 return
 
             self.log(f"Found {len(raw_movies)} movies. Fetching posters...")
+
+            # 4. Fetch posters
             movies_with_posters = []
-            
-            for movie in raw_movies:
+
+            for i, movie in enumerate(raw_movies, 1):
                 title = movie["title"]
                 year = movie["year"]
-                
+
                 poster = tmdb.get_movie_poster(title, year)
+
                 if poster != "N/A":
-                    movies_with_posters.append({"title": title, "poster_url": poster})
+                    movies_with_posters.append({
+                        "title": title,
+                        "poster_url": poster
+                    })
                     self.log(f"  [OK] {title} ({year})")
                 else:
                     self.log(f"  [!] Poster not found for: {title}")
-                
-                time.sleep(0.1)  
+
+                self.set_progress(20 + i / len(raw_movies) * 50)
+                time.sleep(0.1)
 
             if not movies_with_posters:
-                self.log("Error: Could not retrieve any posters for the given movies.")
+                self.log(
+                    "Error: Could not retrieve any posters "
+                    "for the given movies."
+                )
                 return
 
+            # 5. Create tournament
             self.log("\nCreating private draft tournament on UwUFUFU...")
             game_id = uwufufu.create_worldcup(access_token)
-            self.log(f"Tournament created successfully! (ID: {game_id})")
+            self.log(
+                f"Tournament created successfully! (ID: {game_id})"
+            )
+            self.set_progress(75)
 
+            # 6. Upload posters
             self.log("Uploading movie posters...")
-            for movie in movies_with_posters:
+
+            for i, movie in enumerate(movies_with_posters, 1):
                 self.log(f"  -> Uploading: {movie['title']}...")
-                uwufufu.upload_image(access_token, game_id, movie["title"], movie["poster_url"])
+
+                uwufufu.upload_image(
+                    access_token,
+                    game_id,
+                    movie["title"],
+                    movie["poster_url"]
+                )
+
+                self.set_progress(
+                    75 + i / len(movies_with_posters) * 25
+                )
 
             self.log("\nProcess completed successfully!")
-            messagebox.showinfo("Success", "Tournament created and populated successfully on UwUFUFU!")
+            self.root.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "Success",
+                    "Tournament created and populated successfully "
+                    "on UwUFUFU!"
+                )
+            )
 
         except Exception as e:
             self.log(f"\nAn unexpected error occurred: {e}")
-            messagebox.showerror("Error", f"An error occurred during execution:\n{e}")
+            self.root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "Error",
+                    f"An error occurred during execution:\n{e}"
+                )
+            )
+
         finally:
-            self.start_btn.config(state=tk.NORMAL, bg="#28a745")
+            self.root.after(0, self._process_finished)
+
+    def _process_finished(self):
+        self.progress["value"] = 100
+        self.start_btn.config(
+            state=tk.NORMAL,
+            bg="#28a745"
+        )
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    LetterboxdToUwufufuApp(root)
+    root.mainloop()
