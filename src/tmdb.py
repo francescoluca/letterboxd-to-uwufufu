@@ -26,9 +26,29 @@ def get_movie_poster(title, year):
         data = response.json()
         
         if data.get("results"):
-            poster_path = data["results"][0].get("poster_path")
-            if poster_path:
-                return f"{IMAGE_BASE_URL}{poster_path}"
+            try:
+                target_year = int(year)
+            except ValueError:
+                target_year = 0
+
+            for movie in data["results"]:
+                release_date = movie.get("release_date") or ""                
+                if release_date[:4] == str(year):
+                    poster_path = movie.get("poster_path")
+                    if poster_path:
+                        return f"{IMAGE_BASE_URL}{poster_path}"
+
+            for movie in data["results"]:
+                release_date = movie.get("release_date") or ""
+                if release_date:
+                    try:
+                        tmdb_year = int(release_date[:4])
+                        if abs(tmdb_year - target_year) <= 1:
+                            poster_path = movie.get("poster_path")
+                            if poster_path:
+                                return f"{IMAGE_BASE_URL}{poster_path}"
+                    except ValueError:
+                        continue
     except Exception:
         pass
         
