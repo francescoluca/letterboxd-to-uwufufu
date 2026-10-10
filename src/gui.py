@@ -201,8 +201,13 @@ class LetterboxdToUwufufuApp:
 
             # 2. Authentication
             self.log("Authenticating to UwUFUFU...")
-            access_token = uwufufu.authenticate(email, password)
+            try:
+                access_token = uwufufu.authenticate(email, password)
+            except SystemExit:
+                self.log("Login failed: check your UwUFUFU credentials and connection.")
+                return
             if not access_token:
+                self.log("Login failed: UwUFUFU did not return an access token.")
                 return
             self.set_progress(20)
 
