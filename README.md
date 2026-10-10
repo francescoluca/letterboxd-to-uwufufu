@@ -2,13 +2,7 @@
 
 An open-source Python tool that automatically converts your Letterboxd watched movies diary into an interactive worldcup bracket tournament on UwUFUFU.
 
-## Features
-
-* **Zero-Setup Executable:** The standalone executable comes pre-configured. Just select your CSV, log in to UwUFUFU, and start the conversion. No API keys required!
-* **Letterboxd Parser:** Reads standard Letterboxd exported CSV files, automatically adapting to different structures (watched logs, watchlists, and custom lists).
-* **Smart TMDb Integration:** Migrated to The Movie Database (TMDb) for faster response times, broader catalog coverage, and original high-resolution posters.
-* **Secure Auth & Upload:** Securely logs into your UwUFUFU account to create private draft tournaments and bulk-upload movie posters.
-
+![App Demo](assets/demo.gif)
 
 ## Installation & Usage (Desktop GUI)
 
@@ -16,6 +10,8 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 1. Head over to the **Releases** section of this repository.
 2. Download the latest executable file.
 3. Double-click to launch the application.
+
+After the tournament is created on UwUFUFU, open it, click **Edit**, and then publish it.
 
 ### Option B: Run from Source Code
 If you want to run or modify the source code locally, you will need your own TMDb API key.
