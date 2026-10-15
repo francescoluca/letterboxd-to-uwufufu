@@ -13,6 +13,13 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 After the tournament is created on UwUFUFU, open it, click **Edit**, and then publish it.
 
+### Combining multiple CSV files
+Click **+ Add CSV** to select up to 5 Letterboxd CSV files, then choose how to combine them:
+- **Union**: every unique movie found in at least one file.
+- **Intersection**: only the movies present in all the selected files.
+
+Movies are matched by title and year, and each movie appears only once in the tournament.
+
 ### Option B: Run from Source Code
 If you want to run or modify the source code locally, you will need your own TMDb API key.
 1. Clone the repository:

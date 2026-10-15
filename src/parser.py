@@ -1,6 +1,52 @@
 import csv
 import sys
 
+UNION = "union"
+INTERSECTION = "intersection"
+COMBINE_MODES = (UNION, INTERSECTION)
+
+
+def _movie_key(movie):
+    # Same film in different exports may differ only by case or spacing
+    title = " ".join(movie["title"].split()).casefold()
+    return title, movie["year"]
+
+
+def combine_movies(movie_lists, mode=UNION):
+    """Combine several movie lists, keeping each movie once.
+
+    union: every movie found in at least one list.
+    intersection: only movies found in all lists.
+    Order follows the first appearance across the lists.
+    """
+    if mode not in COMBINE_MODES:
+        raise ValueError(f"Unknown combine mode: {mode}")
+
+    if not movie_lists:
+        return []
+
+    common_keys = None
+    if mode == INTERSECTION:
+        common_keys = set.intersection(
+            *({_movie_key(m) for m in movies} for movies in movie_lists)
+        )
+
+    combined = []
+    seen = set()
+
+    for movies in movie_lists:
+        for movie in movies:
+            key = _movie_key(movie)
+            if key in seen:
+                continue
+            if common_keys is not None and key not in common_keys:
+                continue
+            seen.add(key)
+            combined.append(movie)
+
+    return combined
+
+
 def extract_movies(csv_path):
     def process_file(encoding_type):
         local_movies = []

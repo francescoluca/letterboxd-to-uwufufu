@@ -16,12 +16,16 @@ CONFIG_FILE = Path.home() / ".uwufufu_converter.env"
 load_dotenv(CONFIG_FILE)
 cipher = Fernet(ENCRYPTION_KEY)
 
+WINDOW_WIDTH = 560
+WINDOW_HEIGHT = 580
+MAX_CSV_FILES = 5
+CSV_PATHS_SEPARATOR = "|"
+
 
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Letterboxd to UwUFUFU Converter")
-        self.root.geometry("560x550")
         self.root.resizable(False, False)
         self.root.configure(bg="#f8f9fa")
 
@@ -29,30 +33,126 @@ class LetterboxdToUwufufuApp:
         self._build_auth_section()
         self._build_controls()
         self._build_log_section()
+        self._resize_window()
 
     def _build_csv_section(self):
         frame = tk.LabelFrame(
             self.root,
-            text=" 1. Letterboxd CSV ",
+            text=f" 1. Letterboxd CSV (up to {MAX_CSV_FILES}) ",
             bg="#f8f9fa",
             font=("Arial", 9, "bold")
         )
         frame.pack(fill="x", padx=15, pady=(15, 5), ipady=5)
 
-        self.file_entry = tk.Entry(frame, width=48, font=("Arial", 9))
-        self.file_entry.pack(side="left", padx=(10, 5), pady=5)
+        self.csv_rows_frame = tk.Frame(frame, bg="#f8f9fa")
+        self.csv_rows_frame.pack(fill="x")
+        self.csv_rows = []
 
-        if path := os.getenv("csv_path"):
-            self.file_entry.insert(0, path)
+        options = tk.Frame(frame, bg="#f8f9fa")
+        options.pack(fill="x", padx=10, pady=(3, 0))
 
-        tk.Button(
-            frame,
-            text="Browse...",
-            command=self.browse_file,
+        self.add_csv_btn = tk.Button(
+            options,
+            text="+ Add CSV",
+            command=self.add_csv_row,
             width=10,
             bg="#e2e3e5",
             relief="groove"
-        ).pack(side="left", padx=5, pady=5)
+        )
+        self.add_csv_btn.pack(side="left")
+
+        mode = os.getenv("csv_mode")
+        if mode not in parser.COMBINE_MODES:
+            mode = parser.UNION
+        self.combine_mode = tk.StringVar(value=mode)
+
+        self.mode_buttons = []
+        for text, value in (
+            ("Intersection", parser.INTERSECTION),
+            ("Union", parser.UNION)
+        ):
+            btn = tk.Radiobutton(
+                options,
+                text=text,
+                value=value,
+                variable=self.combine_mode,
+                bg="#f8f9fa"
+            )
+            btn.pack(side="right")
+            self.mode_buttons.append(btn)
+
+        tk.Label(options, text="Combine:", bg="#f8f9fa").pack(side="right")
+
+        saved = os.getenv("csv_paths") or os.getenv("csv_path") or ""
+        paths = [p for p in saved.split(CSV_PATHS_SEPARATOR) if p]
+        for path in paths[:MAX_CSV_FILES] or [""]:
+            self.add_csv_row(path)
+
+    def add_csv_row(self, path=""):
+        if len(self.csv_rows) >= MAX_CSV_FILES:
+            return
+
+        row = tk.Frame(self.csv_rows_frame, bg="#f8f9fa")
+        row.pack(fill="x")
+
+        entry = tk.Entry(row, width=45, font=("Arial", 9))
+        entry.pack(side="left", padx=(10, 5), pady=3)
+        entry.insert(0, path)
+
+        tk.Button(
+            row,
+            text="Browse...",
+            command=lambda: self.browse_file(entry),
+            width=10,
+            bg="#e2e3e5",
+            relief="groove"
+        ).pack(side="left", padx=5, pady=3)
+
+        remove_btn = tk.Button(
+            row,
+            text="✕",
+            command=lambda: self.remove_csv_row(row),
+            width=2,
+            bg="#e2e3e5",
+            relief="groove"
+        )
+        remove_btn.pack(side="left", padx=(0, 5), pady=3)
+
+        self.csv_rows.append((row, entry, remove_btn))
+        self._refresh_csv_controls()
+
+    def remove_csv_row(self, row):
+        if len(self.csv_rows) <= 1:
+            return
+
+        self.csv_rows = [r for r in self.csv_rows if r[0] is not row]
+        row.destroy()
+        self._refresh_csv_controls()
+
+    def _refresh_csv_controls(self):
+        multiple = len(self.csv_rows) > 1
+        multiple_state = tk.NORMAL if multiple else tk.DISABLED
+
+        for _, _, remove_btn in self.csv_rows:
+            remove_btn.config(state=multiple_state)
+
+        for btn in self.mode_buttons:
+            btn.config(state=multiple_state)
+
+        self.add_csv_btn.config(
+            state=tk.NORMAL
+            if len(self.csv_rows) < MAX_CSV_FILES
+            else tk.DISABLED
+        )
+
+        self._resize_window()
+
+    def _resize_window(self):
+        # Grow the window by one row height for each extra CSV row
+        self.root.update_idletasks()
+        row_height = self.csv_rows[0][0].winfo_reqheight()
+        extra = (len(self.csv_rows) - 1) * row_height
+        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT + extra}")
 
     def _build_auth_section(self):
         frame = tk.LabelFrame(
@@ -141,7 +241,7 @@ class LetterboxdToUwufufuApp:
     def set_progress(self, value):
         self.root.after(0, lambda: self.progress.configure(value=value))
 
-    def browse_file(self):
+    def browse_file(self, entry):
         filename = filedialog.askopenfilename(
             filetypes=[
                 ("CSV Files", "*.csv"),
@@ -150,18 +250,32 @@ class LetterboxdToUwufufuApp:
         )
 
         if filename:
-            self.file_entry.delete(0, tk.END)
-            self.file_entry.insert(0, filename)
+            entry.delete(0, tk.END)
+            entry.insert(0, filename)
 
     def start_process(self):
-        csv_path = self.file_entry.get().strip()
+        csv_paths = [
+            path for _, entry, _ in self.csv_rows
+            if (path := entry.get().strip())
+        ]
+        mode = self.combine_mode.get()
         email = self.email_entry.get().strip()
         password = self.pass_entry.get().strip()
 
-        if not all((csv_path, email, password)):
+        if not all((csv_paths, email, password)):
             messagebox.showerror(
                 "Missing Fields",
-                "Please fill in all fields (CSV file, Email, and Password)."
+                "Please fill in all fields "
+                "(at least one CSV file, Email, and Password)."
+            )
+            return
+
+        missing = [path for path in csv_paths if not os.path.isfile(path)]
+        if missing:
+            messagebox.showerror(
+                "File Not Found",
+                "The following CSV files could not be found:\n"
+                + "\n".join(missing)
             )
             return
 
@@ -174,16 +288,17 @@ class LetterboxdToUwufufuApp:
         CONFIG_FILE.write_text(
             f"email={email}\n"
             f"password={encrypted_password}\n"
-            f"csv_path={csv_path}\n"
+            f"csv_paths={CSV_PATHS_SEPARATOR.join(csv_paths)}\n"
+            f"csv_mode={mode}\n"
         )
 
         threading.Thread(
             target=self.run_conversion,
-            args=(csv_path, email, password),
+            args=(csv_paths, mode, email, password),
             daemon=True
         ).start()
 
-    def run_conversion(self, csv_path, email, password):
+    def run_conversion(self, csv_paths, mode, email, password):
         try:
             # 1. API key
             self.log("Verifying API Key...")
@@ -211,14 +326,35 @@ class LetterboxdToUwufufuApp:
                 return
             self.set_progress(20)
 
-            # 3. Read CSV
-            self.log(
-                f"Reading movies from CSV: {os.path.basename(csv_path)}..."
-            )
-            raw_movies = parser.extract_movies(csv_path)
+            # 3. Read CSV files
+            movie_lists = []
+
+            for csv_path in csv_paths:
+                self.log(
+                    f"Reading movies from CSV: {os.path.basename(csv_path)}..."
+                )
+                movies = parser.extract_movies(csv_path)
+                self.log(f"  {len(movies)} movies read.")
+                movie_lists.append(movies)
+
+            raw_movies = parser.combine_movies(movie_lists, mode)
+
+            if len(csv_paths) > 1:
+                self.log(
+                    f"{mode.capitalize()} of {len(csv_paths)} files: "
+                    f"{len(raw_movies)} unique movies."
+                )
 
             if not raw_movies:
-                self.log("Error: No valid movies found in the selected CSV.")
+                if len(csv_paths) > 1 and mode == parser.INTERSECTION:
+                    self.log(
+                        "Error: No movies are present in all "
+                        "the selected CSV files."
+                    )
+                else:
+                    self.log(
+                        "Error: No valid movies found in the selected CSV."
+                    )
                 return
 
             self.log(f"Found {len(raw_movies)} movies. Fetching posters...")
