@@ -13,8 +13,12 @@ An open-source Python tool that automatically converts your Letterboxd watched m
 
 After the tournament is created on UwUFUFU, open it, click **Edit**, and then publish it.
 
+To cancel a running conversion, click **Stop**. If the draft tournament was already created, it stays on UwUFUFU with the posters uploaded so far.
+
+Movies whose poster can't be found are left out of the tournament. They are listed at the end of the **Activity** log so you can add them manually when you edit the tournament.
+
 #### Combining multiple CSV files
-Click **+ Add CSV** to select up to 5 Letterboxd CSV files, then choose how to combine them:
+Click **Add CSV** to select up to 6 Letterboxd CSV files (you can pick several at once), then choose how to combine them under **Settings**:
 - **Union**: every unique movie found in at least one file.
 - **Intersection**: only the movies present in all the selected files.
 

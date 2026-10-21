@@ -1,8 +1,8 @@
-import tkinter as tk
+import customtkinter as ctk
 from src.gui import LetterboxdToUwufufuApp
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     app = LetterboxdToUwufufuApp(root)
     root.mainloop()
 
