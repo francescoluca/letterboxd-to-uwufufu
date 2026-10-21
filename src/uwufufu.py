@@ -1,6 +1,15 @@
-#Returns Uwufufu access token
 import requests
 import sys
+import threading
+
+# One Session per upload thread, so each poster reuses the open connection
+# instead of paying a new TLS handshake
+_local = threading.local()
+
+def _session():
+    if not hasattr(_local, "session"):
+        _local.session = requests.Session()
+    return _local.session
 
 def authenticate(email, password):
     try:
@@ -38,7 +47,8 @@ def create_worldcup(accessToken):
 def upload_image(accessToken, game_id, title, poster_url):
     headers = {"Authorization": f"Bearer {accessToken}"}
     upload_url = "https://api.uwufufu.com/v1/selections/image"
-    img_response = requests.get(poster_url)
+    session = _session()
+    img_response = session.get(poster_url)
     payload_data = {
         "type": "selection",
         "worldcupId": str(game_id),
@@ -49,8 +59,8 @@ def upload_image(accessToken, game_id, title, poster_url):
         "file": (f"{title}.jpg", img_response.content, "image/jpeg")
     }
     
-    r_upload = requests.post(
-        upload_url, 
+    r_upload = session.post(
+        upload_url,
         headers=headers, 
         data=payload_data, 
         files=payload_files

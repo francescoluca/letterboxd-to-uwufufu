@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import font as tkfont
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import customtkinter as ctk
 from dotenv import load_dotenv
@@ -33,7 +34,16 @@ MODE_HELP = {
     parser.UNION: "Every movie that appears in at least one file.",
     parser.INTERSECTION: "Only the movies that appear in every file.",
 }
+QUALITY_LABELS = {tmdb.STANDARD_QUALITY: "Standard", tmdb.HIGH_QUALITY: "High"}
+QUALITY_HELP = {
+    tmdb.STANDARD_QUALITY: "Sharp enough for most screens, quick to upload.",
+    tmdb.HIGH_QUALITY: "Sharper posters, but uploads take 2-3 times longer.",
+}
 THEMES = ("light", "dark", "system")
+
+# Posters uploaded at the same time. 4 was the fastest in tests: with more,
+# the uploads just share the same upload bandwidth
+UPLOAD_WORKERS = 4
 
 # Layout: a 3x2 workbench of file cards on the left, a tool panel on the right
 GRID_COLUMNS = 3
@@ -265,6 +275,11 @@ class LetterboxdToUwufufuApp:
             mode = parser.UNION
         self.combine_mode = ctk.StringVar(value=MODE_LABELS[mode])
 
+        quality = os.getenv("poster_quality")
+        if quality not in tmdb.POSTER_QUALITIES:
+            quality = tmdb.STANDARD_QUALITY
+        self.poster_quality = ctk.StringVar(value=QUALITY_LABELS[quality])
+
         self.workbench = ctk.CTkFrame(self.root, fg_color="transparent")
         self.workbench.pack(side="left", fill="y")
 
@@ -406,7 +421,7 @@ class LetterboxdToUwufufuApp:
         )
 
     def _segmented(self, parent, values, variable, command=None):
-        return ctk.CTkSegmentedButton(
+        selector = ctk.CTkSegmentedButton(
             parent,
             values=values,
             variable=variable,
@@ -423,6 +438,11 @@ class LetterboxdToUwufufuApp:
             text_color=INK,
             text_color_disabled=PREVIEW_TEXT
         )
+        # CustomTkinter sizes each segment by its text, so longer labels get
+        # wider segments; a uniform group keeps them all the same width
+        for index in range(len(values)):
+            selector.grid_columnconfigure(index, uniform="segment")
+        return selector
 
     def _entry(self, parent, **kwargs):
         entry = ctk.CTkEntry(
@@ -782,7 +802,6 @@ class LetterboxdToUwufufuApp:
             wraplength=PANEL_WIDTH - 40
         ).pack(fill="x", pady=(2, 0))
 
-        # 1. Files
         body = self._step(content, 1, "Files")
         self.files_summary = self._label(body, "", self.body_font)
         self.files_summary.pack(fill="x")
@@ -793,7 +812,6 @@ class LetterboxdToUwufufuApp:
             DIMMED
         ).pack(fill="x", pady=(2, 0))
 
-        # 2. Settings
         body = self._step(content, 2, "Settings")
         self._label(body, "Combine files", self.label_font).pack(fill="x")
 
@@ -808,7 +826,21 @@ class LetterboxdToUwufufuApp:
         self.mode_help = self._label(body, "", self.small_font, DIMMED)
         self.mode_help.pack(fill="x", pady=(4, 0))
 
-        # 3. Account
+        self._label(body, "Poster quality", self.label_font).pack(
+            fill="x", pady=(12, 0)
+        )
+
+        self._segmented(
+            body,
+            list(QUALITY_LABELS.values()),
+            self.poster_quality,
+            command=lambda _: self._update_quality_help()
+        ).pack(fill="x", pady=(4, 0))
+
+        self.quality_help = self._label(body, "", self.small_font, DIMMED)
+        self.quality_help.pack(fill="x", pady=(4, 0))
+        self._update_quality_help()
+
         body = self._step(content, 3, "UwUFUFU account")
         self._label(body, "Email", self.label_font).pack(fill="x")
 
@@ -859,7 +891,6 @@ class LetterboxdToUwufufuApp:
         )
         self.start_btn.pack(fill="x", pady=(16, 0))
 
-        # 4. Review
         body = self._step(content, 4, "Review")
         status = ctk.CTkFrame(body, fg_color="transparent")
         status.pack(fill="x")
@@ -915,6 +946,17 @@ class LetterboxdToUwufufuApp:
             text = "Add another file to combine them."
         self.mode_help.configure(text=text)
 
+    def _selected_quality(self):
+        return next(
+            value for value, label in QUALITY_LABELS.items()
+            if label == self.poster_quality.get()
+        )
+
+    def _update_quality_help(self):
+        self.quality_help.configure(
+            text=QUALITY_HELP[self._selected_quality()]
+        )
+
     def _toggle_password(self):
         hidden = self.pass_toggle.cget("text") == "Show"
         self.pass_entry.configure(show="" if hidden else "•")
@@ -958,6 +1000,7 @@ class LetterboxdToUwufufuApp:
     def start_process(self):
         csv_paths = list(self.csv_paths)
         mode = self._selected_mode()
+        quality = self._selected_quality()
         email = self.email_entry.get().strip()
         password = self.pass_entry.get().strip()
 
@@ -996,12 +1039,13 @@ class LetterboxdToUwufufuApp:
             f"password={encrypted_password}\n"
             f"csv_paths={CSV_PATHS_SEPARATOR.join(csv_paths)}\n"
             f"csv_mode={mode}\n"
+            f"poster_quality={quality}\n"
             f"theme={self.theme}\n"
         )
 
         threading.Thread(
             target=self.run_conversion,
-            args=(csv_paths, mode, email, password),
+            args=(csv_paths, mode, quality, email, password),
             daemon=True
         ).start()
 
@@ -1015,14 +1059,13 @@ class LetterboxdToUwufufuApp:
         if self.stop_event.is_set():
             raise ConversionStopped
 
-    def run_conversion(self, csv_paths, mode, email, password):
+    def run_conversion(self, csv_paths, mode, quality, email, password):
         outcome = "failed"
         game_id = None
         uploaded = 0
         no_poster = []
 
         try:
-            # 1. API key
             self.step("Checking API key…")
             if not tmdb.validate_api_key():
                 self.log("Invalid TMDb API key.", "error")
@@ -1037,7 +1080,6 @@ class LetterboxdToUwufufuApp:
             self.set_progress(10)
             self._check_stop()
 
-            # 2. Authentication
             self.step("Signing in to UwUFUFU…")
             try:
                 access_token = uwufufu.authenticate(email, password)
@@ -1053,7 +1095,6 @@ class LetterboxdToUwufufuApp:
                 return
             self.set_progress(20)
 
-            # 3. Read CSV files
             movie_lists = []
 
             for csv_path in csv_paths:
@@ -1086,7 +1127,6 @@ class LetterboxdToUwufufuApp:
 
             self.step(f"Fetching posters for {len(raw_movies)} movies…")
 
-            # 4. Fetch posters
             movies_with_posters = []
 
             for i, movie in enumerate(raw_movies, 1):
@@ -1094,7 +1134,7 @@ class LetterboxdToUwufufuApp:
                 title = movie["title"]
                 year = movie["year"]
 
-                poster = tmdb.get_movie_poster(title, year)
+                poster = tmdb.get_movie_poster(title, year, quality)
 
                 if poster != "N/A":
                     movies_with_posters.append({
@@ -1114,34 +1154,47 @@ class LetterboxdToUwufufuApp:
                 self.log("No posters found for these movies.", "error")
                 return
 
-            # 5. Create tournament
             self._check_stop()
             self.step("\nCreating a private draft on UwUFUFU…")
             game_id = uwufufu.create_worldcup(access_token)
             self.log(f"  Draft created (ID {game_id})")
             self.set_progress(75)
 
-            # 6. Upload posters
             self.step("Uploading posters…")
+            total = len(movies_with_posters)
+            pool = ThreadPoolExecutor(UPLOAD_WORKERS)
 
-            for i, movie in enumerate(movies_with_posters, 1):
-                self._check_stop()
-                self.log(f"  {movie['title']}")
+            try:
+                futures = {
+                    pool.submit(
+                        self._upload_poster, access_token, game_id, movie
+                    ): movie
+                    for movie in movies_with_posters
+                }
 
-                uwufufu.upload_image(
-                    access_token,
-                    game_id,
-                    movie["title"],
-                    movie["poster_url"]
-                )
-                uploaded = i
+                for done, future in enumerate(as_completed(futures), 1):
+                    response = future.result()
+                    if response is None:
+                        continue
 
-                self.set_status(
-                    f"Uploading posters {i}/{len(movies_with_posters)}"
-                )
-                self.set_progress(
-                    75 + i / len(movies_with_posters) * 25
-                )
+                    title = futures[future]["title"]
+                    if response.ok:
+                        uploaded += 1
+                        self.log(f"  {title}")
+                    else:
+                        self.log(
+                            f"  {title}: upload failed "
+                            f"(HTTP {response.status_code})",
+                            "warn"
+                        )
+
+                    self.set_status(f"Uploading posters {done}/{total}")
+                    self.set_progress(75 + done / total * 25)
+            finally:
+                # If an error ends the loop early, drop the queued uploads
+                pool.shutdown(cancel_futures=True)
+
+            self._check_stop()
 
             self.log(
                 "\nDone. Open the tournament on UwUFUFU, click Edit, "
@@ -1176,6 +1229,17 @@ class LetterboxdToUwufufuApp:
                 0,
                 lambda: self._process_finished(outcome, len(no_poster))
             )
+
+    def _upload_poster(self, access_token, game_id, movie):
+        # Posters still queued when Stop is pressed are skipped
+        if self.stop_event.is_set():
+            return None
+        return uwufufu.upload_image(
+            access_token,
+            game_id,
+            movie["title"],
+            movie["poster_url"]
+        )
 
     def _report_missing_posters(self, movies):
         if not movies:

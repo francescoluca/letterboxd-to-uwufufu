@@ -2,7 +2,13 @@ import requests
 
 from src.config import TMDB_API_KEY
 BASE_URL = "https://api.themoviedb.org/3"
-IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w780"
+IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
+
+# Poster widths on TMDb: w780 is sharper, w500 is less than half the size
+# and uploads to UwUFUFU much faster
+STANDARD_QUALITY = "w500"
+HIGH_QUALITY = "w780"
+POSTER_QUALITIES = (STANDARD_QUALITY, HIGH_QUALITY)
 
 def validate_api_key():
     url = "https://api.themoviedb.org/3/authentication"
@@ -13,7 +19,7 @@ def validate_api_key():
     except requests.exceptions.RequestException:
         return False
 
-def get_movie_poster(title, year):
+def get_movie_poster(title, year, quality=STANDARD_QUALITY):
     url = f"{BASE_URL}/search/movie"
     params = {
         "api_key": TMDB_API_KEY,
@@ -36,7 +42,7 @@ def get_movie_poster(title, year):
                 if release_date[:4] == str(year):
                     poster_path = movie.get("poster_path")
                     if poster_path:
-                        return f"{IMAGE_BASE_URL}{poster_path}"
+                        return f"{IMAGE_BASE_URL}/{quality}{poster_path}"
 
             for movie in data["results"]:
                 release_date = movie.get("release_date") or ""
@@ -46,7 +52,7 @@ def get_movie_poster(title, year):
                         if abs(tmdb_year - target_year) <= 1:
                             poster_path = movie.get("poster_path")
                             if poster_path:
-                                return f"{IMAGE_BASE_URL}{poster_path}"
+                                return f"{IMAGE_BASE_URL}/{quality}{poster_path}"
                     except ValueError:
                         continue
     except Exception:
