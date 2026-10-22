@@ -45,41 +45,49 @@ THEMES = ("light", "dark", "system")
 # the uploads just share the same upload bandwidth
 UPLOAD_WORKERS = 4
 
-# Layout: a scrolling list of files on the left, a tool panel on the right
+# Layout: a scrolling list of files on the left, a tool panel card on the
+# right, both sitting on the sage canvas
 VIEW_WIDTH = 544
 VIEW_HEIGHT = 414
 PANEL_WIDTH = 360
+PANEL_PADDING = 24
 ROW_GAP = 8
-ROW_PADDING = 14
+ROW_PADDING = 16
 WORKBENCH_PADDING = 24
-WINDOW_WIDTH = VIEW_WIDTH + 2 * WORKBENCH_PADDING + 1 + PANEL_WIDTH
+WINDOW_WIDTH = VIEW_WIDTH + 3 * WORKBENCH_PADDING + PANEL_WIDTH
 
-PAPER = ("#f5f4f1", "#141416")
-SURFACE = ("#fafafa", "#1a1a1d")
-CARD = ("#ffffff", "#202023")
-CARD_SELECTED = ("#eff6ff", "#232c3c")
-INPUT_BG = ("#ffffff", "#141416")
-TRACK = ("#e9e7e2", "#27272a")
-TRACK_HOVER = ("#dfddd7", "#333338")
-SELECTED = ("#ffffff", "#3f3f46")
-BORDER = ("#e5e7eb", "#28282d")
-INPUT_BORDER = ("#d1d5db", "#3f3f46")
-INK = ("#373530", "#fafafa")
-MUTED = ("#4b5563", "#a1a1aa")
-DIMMED = ("#868e96", "#8b8b93")
-PREVIEW_TEXT = ("#9ca3af", "#71717a")
-LINK = ("#2563eb", "#60a5fa")
-PRIMARY = ("#3b82f6", "#3b82f6")
-PRIMARY_HOVER = ("#2563eb", "#2563eb")
-SUCCESS = ("#16a34a", "#22c55e")
-WARNING = ("#d97706", "#f59e0b")
-DANGER = ("#dc2626", "#f87171")
-DANGER_SUBTLE = ("#fdecec", "#2f1e21")
-DANGER_HOVER = ("#fbdada", "#3a2023")
-WHITE = ("#ffffff", "#ffffff")
-ICON_TILE = "#373530"
-SUN = "#f59e0b"
-MOON = "#6366f1"
+# Colours follow DESIGN.md: white cards on a sage canvas, near-black ink and
+# a single lime-green accent kept for primary actions. Dark mode flips the
+# canvas to ink, as the design's dark bands do
+PAPER = ("#e8ebe6", "#0e0f0c")
+CARD = ("#ffffff", "#1b1d19")
+CARD_HOVER = ("#f3f5f1", "#22251f")
+CARD_SELECTED = ("#e2f6d5", "#1d2a14")
+CARD_SELECTED_HOVER = ("#d6f1c4", "#24331a")
+# Nothing has a border, so inputs are sage fills on the white card
+INPUT_BG = ("#e8ebe6", "#0e0f0c")
+INPUT_FOCUS = ("#dde1da", "#000000")
+TRACK = ("#e8ebe6", "#2a2d27")
+TRACK_HOVER = ("#dde1da", "#353831")
+SELECTED = ("#c5edab", "#163300")
+SCROLLBAR = ("#c6cac2", "#3a3d36")
+INPUT_BORDER = ("#868685", "#5b5d58")
+INK = ("#0e0f0c", "#e8ebe6")
+MUTED = ("#454745", "#b4b6b2")
+DIMMED = ("#868685", "#868685")
+PREVIEW_TEXT = ("#a8aaa6", "#5b5d58")
+PRIMARY = ("#9fe870", "#9fe870")
+PRIMARY_HOVER = ("#cdffad", "#cdffad")
+ON_PRIMARY = ("#0e0f0c", "#0e0f0c")
+SUCCESS = ("#2ead4b", "#2ead4b")
+WARNING = ("#b86700", "#ffd11a")
+DANGER = ("#d03238", "#ff6b70")
+DANGER_SUBTLE = ("#e8ebe6", "#320707")
+DANGER_HOVER = ("#dde1da", "#451010")
+ICON_TILE = "#0e0f0c"
+ICON_MARK = "#9fe870"
+SUN = "#9fe870"
+MOON = "#0e0f0c"
 
 # The theme button morphs between a sun (frame 0) and a moon (last frame)
 THEME_ICON_SIZE = 20
@@ -92,7 +100,7 @@ DWMWA_CAPTION_COLOR = 35
 PRIMARY_STYLE = {
     "fg_color": PRIMARY,
     "hover_color": PRIMARY_HOVER,
-    "text_color": WHITE
+    "text_color": ON_PRIMARY
 }
 STOP_STYLE = {
     "fg_color": DANGER_SUBTLE,
@@ -120,7 +128,7 @@ class ConversionStopped(Exception):
 
 
 def render_icon(size=64, radius=14):
-    """A tournament bracket, white on a dark rounded tile."""
+    """A tournament bracket, lime green on an ink rounded tile."""
     image = tk.PhotoImage(width=size, height=size)
 
     for y in range(size):
@@ -135,7 +143,7 @@ def render_icon(size=64, radius=14):
         (30, 17, 35, 47),
         (30, 30, 50, 35)
     ):
-        image.put("#ffffff", to=box)
+        image.put(ICON_MARK, to=box)
 
     return image
 
@@ -297,19 +305,20 @@ class LetterboxdToUwufufuApp:
         self.workbench = ctk.CTkFrame(self.root, fg_color="transparent")
         self.workbench.pack(side="left", fill="y")
 
-        ctk.CTkFrame(
-            self.root,
-            width=1,
-            corner_radius=0,
-            fg_color=BORDER
-        ).pack(side="left", fill="y")
-
+        # A white card on the sage canvas: the contrast is the elevation,
+        # so it needs no border or shadow
         self.panel = ctk.CTkFrame(
             self.root,
-            corner_radius=0,
-            fg_color=SURFACE
+            corner_radius=24,
+            fg_color=CARD
         )
-        self.panel.pack(side="left", fill="both", expand=True)
+        self.panel.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(0, WORKBENCH_PADDING),
+            pady=WORKBENCH_PADDING
+        )
 
         self._build_workbench()
         self._build_panel()
@@ -322,38 +331,60 @@ class LetterboxdToUwufufuApp:
         self._apply_theme(ctk.get_appearance_mode())
 
     def _build_fonts(self):
-        # Stirling uses Inter, falling back to the system UI font
+        # DESIGN.md sets everything in Inter at weight 600 for emphasis and
+        # 900 for the headline, falling back to the system UI font
         families = tkfont.families()
         family = "Inter" if "Inter" in families else (
             tkfont.nametofont("TkDefaultFont").actual("family")
         )
-        semibold = f"{family} Semibold"
 
-        def strong(size):
-            if semibold in families:
-                return ctk.CTkFont(family=semibold, size=size)
+        def weighted(names, size):
+            # Tk only knows normal and bold, so heavier and lighter weights
+            # come from the families a font installs for them
+            for name in names:
+                if name in families:
+                    return ctk.CTkFont(family=name, size=size)
             return ctk.CTkFont(family=family, size=size, weight="bold")
 
-        self.title_font = strong(18)
-        self.heading_font = strong(14)
-        self.label_font = strong(13)
-        self.button_font = strong(14)
-        self.body_font = ctk.CTkFont(family=family, size=13)
+        def strong(size):
+            return weighted(
+                (f"{family} SemiBold", f"{family} Semibold"), size
+            )
+
+        self.title_font = weighted(
+            (f"{family} Black", "Inter Black", "Segoe UI Black"), 34
+        )
+        self.subtitle_font = strong(20)
+        self.heading_font = strong(16)
+        self.label_font = strong(14)
+        self.button_font = strong(16)
+        self.body_font = ctk.CTkFont(family=family, size=14)
         self.small_font = ctk.CTkFont(family=family, size=12)
+        self.link_font = strong(12)
+        self.link_font.configure(underline=True)
         self.icon_font = ctk.CTkFont(family=family, size=18)
         self.mono_font = ctk.CTkFont(family=MONO_FONT, size=12)
 
-        # The File Explorer folder from Windows' icon font (11, then 10);
-        # other systems get a word instead
+        # The File Explorer folder and the eye from Windows' icon font (11,
+        # then 10); other systems get words instead
         if "Segoe Fluent Icons" in families:
-            self.folder_icon = ""
-            self.folder_font = ctk.CTkFont(family="Segoe Fluent Icons", size=15)
+            self.folder_icon = "\ue8b7"
+            symbols = "Segoe Fluent Icons"
         elif "Segoe MDL2 Assets" in families:
-            self.folder_icon = ""
-            self.folder_font = ctk.CTkFont(family="Segoe MDL2 Assets", size=15)
+            self.folder_icon = "\ued25"
+            symbols = "Segoe MDL2 Assets"
         else:
             self.folder_icon = "Show"
+            symbols = None
+
+        if symbols:
+            self.folder_font = ctk.CTkFont(family=symbols, size=15)
+            self.eye_icons = {False: "\ue890", True: "\ued1a"}  # View, Hide
+            self.eye_font = ctk.CTkFont(family=symbols, size=16)
+        else:
             self.folder_font = self.small_font
+            self.eye_icons = {False: "Show", True: "Hide"}
+            self.eye_font = self.link_font
 
     def _resize_window(self):
         self.root.update_idletasks()
@@ -446,21 +477,24 @@ class LetterboxdToUwufufuApp:
             **options
         )
 
-    def _segmented(self, parent, values, variable, command=None):
+    def _segmented(self, parent, values, variable, command=None, track=TRACK,
+                   track_hover=TRACK_HOVER):
+        # A pill track; the chosen segment takes the soft green fill, since
+        # the bright green is kept for primary actions
         selector = ctk.CTkSegmentedButton(
             parent,
             values=values,
             variable=variable,
             command=command,
-            height=32,
-            corner_radius=8,
+            height=36,
+            corner_radius=18,
             border_width=3,
-            font=self.body_font,
-            fg_color=TRACK,
+            font=self.label_font,
+            fg_color=track,
             selected_color=SELECTED,
             selected_hover_color=SELECTED,
-            unselected_color=TRACK,
-            unselected_hover_color=TRACK_HOVER,
+            unselected_color=track,
+            unselected_hover_color=track_hover,
             text_color=INK,
             text_color_disabled=PREVIEW_TEXT
         )
@@ -473,21 +507,25 @@ class LetterboxdToUwufufuApp:
     def _entry(self, parent, **kwargs):
         entry = ctk.CTkEntry(
             parent,
-            height=36,
-            corner_radius=8,
-            border_width=1,
+            height=40,
+            corner_radius=12,
+            border_width=0,
             fg_color=INPUT_BG,
-            border_color=INPUT_BORDER,
             text_color=INK,
-            placeholder_text_color=PREVIEW_TEXT,
+            placeholder_text_color=DIMMED,
             font=self.body_font,
             **kwargs
         )
-        entry.bind("<FocusIn>", lambda e: entry.configure(border_color=PRIMARY))
-        entry.bind(
-            "<FocusOut>",
-            lambda e: entry.configure(border_color=INPUT_BORDER)
-        )
+        def fill(color):
+            # Borderless, so the fill darkens a little while typing. Buttons
+            # placed inside the field, like the eye, follow it
+            entry.configure(fg_color=color)
+            for child in entry.winfo_children():
+                if isinstance(child, ctk.CTkButton):
+                    child.configure(fg_color=color, bg_color=color)
+
+        entry.bind("<FocusIn>", lambda e: fill(INPUT_FOCUS))
+        entry.bind("<FocusOut>", lambda e: fill(INPUT_BG))
         return entry
 
     def _checkbox(self, parent, text, command):
@@ -498,14 +536,14 @@ class LetterboxdToUwufufuApp:
             text=text,
             command=command,
             width=0,
-            checkbox_width=16,
-            checkbox_height=16,
-            corner_radius=8,  # half the size, so the box is a circle
+            checkbox_width=18,
+            checkbox_height=18,
+            corner_radius=9,  # half the size, so the box is a circle
             border_width=2,
             hover=False,
             fg_color=PRIMARY,
             border_color=INPUT_BORDER,
-            checkmark_color=WHITE,
+            checkmark_color=ON_PRIMARY,
             text_color=INK,
             text_color_disabled=DIMMED,
             font=self.body_font
@@ -514,6 +552,41 @@ class LetterboxdToUwufufuApp:
     # ---- Workbench ----------------------------------------------------------
 
     def _build_workbench(self):
+        # The headline sits on the sage canvas, beside the tool card, as in
+        # DESIGN.md's split hero
+        hero = ctk.CTkFrame(self.workbench, fg_color="transparent")
+        hero.pack(fill="x", padx=WORKBENCH_PADDING, pady=(WORKBENCH_PADDING, 0))
+
+        self._label(hero, "Letterboxd to UwUFUFU", self.title_font).grid(
+            row=0, column=0, sticky="w"
+        )
+        self._label(
+            hero,
+            "Build a UwUFUFU bracket tournament from your "
+            "Letterboxd CSV exports.",
+            self.body_font,
+            MUTED
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        hero.grid_columnconfigure(0, weight=1)
+
+        # The button only lays out an image it is created with, so start
+        # with the icon for the current theme (see _show_theme_icon)
+        dark = ctk.get_appearance_mode() == "Dark"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.theme_btn = ctk.CTkButton(
+                hero,
+                text="",
+                image=self._theme_icon(0 if dark else THEME_ICON_FRAMES),
+                command=self.toggle_theme,
+                width=36,
+                height=36,
+                corner_radius=18,
+                fg_color=CARD,
+                hover_color=TRACK_HOVER
+            )
+        self.theme_btn.grid(row=0, column=1, sticky="e")
+
         top = ctk.CTkFrame(self.workbench, fg_color="transparent")
         top.pack(
             fill="x",
@@ -522,11 +595,14 @@ class LetterboxdToUwufufuApp:
         )
 
         self.view = ctk.StringVar(value="Files")
+        # On the sage canvas the track is white, like the cards below it
         self._segmented(
             top,
             ["Files", "Activity"],
             self.view,
-            command=self._show_view
+            command=self._show_view,
+            track=CARD,
+            track_hover=TRACK
         ).pack(side="left")
 
         self.file_count_label = self._label(
@@ -553,15 +629,14 @@ class LetterboxdToUwufufuApp:
 
         self.log_area = ctk.CTkTextbox(
             area,
-            corner_radius=12,
-            border_width=1,
-            border_spacing=12,
+            corner_radius=24,
+            border_width=0,
+            border_spacing=16,
             fg_color=CARD,
-            border_color=BORDER,
             text_color=MUTED,
             font=self.mono_font,
             wrap="word",
-            scrollbar_button_color=BORDER,
+            scrollbar_button_color=SCROLLBAR,
             scrollbar_button_hover_color=INPUT_BORDER
         )
         self._append_log("Activity will appear here.", "placeholder")
@@ -577,15 +652,15 @@ class LetterboxdToUwufufuApp:
         self.select_all_box = self._checkbox(
             toolbar, "Select all", self.toggle_all
         )
-        self.select_all_box.pack(side="left", padx=(ROW_PADDING + 1, 0))
+        self.select_all_box.pack(side="left", padx=(ROW_PADDING, 0))
 
         ctk.CTkButton(
             toolbar,
             text="Add CSV",
             command=self.browse_files,
-            width=96,
-            height=32,
-            corner_radius=8,
+            width=104,
+            height=36,
+            corner_radius=18,
             font=self.label_font,
             **PRIMARY_STYLE
         ).pack(side="right")
@@ -594,7 +669,7 @@ class LetterboxdToUwufufuApp:
             self.file_view,
             corner_radius=0,
             fg_color="transparent",
-            scrollbar_button_color=BORDER,
+            scrollbar_button_color=SCROLLBAR,
             scrollbar_button_hover_color=INPUT_BORDER
         )
         # Re-check the scrollbar when the rows or the space for them change
@@ -606,28 +681,26 @@ class LetterboxdToUwufufuApp:
         # Stands in for the list until a file is added
         self.empty_state = ctk.CTkFrame(
             self.file_view,
-            corner_radius=12,
-            border_width=1,
-            fg_color=SURFACE,
-            border_color=BORDER
+            corner_radius=24,
+            fg_color=CARD
         )
         message = ctk.CTkFrame(self.empty_state, fg_color="transparent")
         message.place(relx=0.5, rely=0.5, anchor="center")
 
-        self._label(message, "No CSV files yet", self.heading_font).pack()
+        self._label(message, "No CSV files yet", self.subtitle_font).pack()
         self._label(
             message,
             "Click here or on Add CSV to choose\nyour Letterboxd exports.",
-            self.small_font,
-            DIMMED,
+            self.body_font,
+            MUTED,
             justify="center"
-        ).pack(pady=(4, 0))
+        ).pack(pady=(8, 0))
 
         self._make_clickable(
             self.empty_state,
             self.browse_files,
             lambda hover: self.empty_state.configure(
-                border_color=PRIMARY if hover else BORDER
+                fg_color=CARD_HOVER if hover else CARD
             )
         )
 
@@ -710,10 +783,8 @@ class LetterboxdToUwufufuApp:
 
         row = ctk.CTkFrame(
             self.file_list,
-            corner_radius=10,
-            border_width=1,
-            fg_color=CARD,
-            border_color=BORDER
+            corner_radius=16,
+            fg_color=CARD
         )
         row.pack(fill="x", pady=(0, ROW_GAP))
         row.grid_columnconfigure(1, weight=1)
@@ -725,14 +796,14 @@ class LetterboxdToUwufufuApp:
         name = self._label(
             row, clip(os.path.basename(path), 40), self.label_font
         )
-        name.grid(row=0, column=1, sticky="ew", pady=(12, 0))
+        name.grid(row=0, column=1, sticky="ew", pady=(14, 0))
 
         self._label(
             row,
             f"Letterboxd account: {account or 'unknown'}",
             self.small_font,
             MUTED if account else DIMMED
-        ).grid(row=1, column=1, sticky="ew", pady=(2, 12))
+        ).grid(row=1, column=1, sticky="ew", pady=(2, 14))
 
         count = len(movies)
         self._label(
@@ -747,9 +818,9 @@ class LetterboxdToUwufufuApp:
             text=self.folder_icon,
             command=lambda: self.show_csv(path),
             state=tk.NORMAL if os.path.isfile(path) else tk.DISABLED,
-            width=28,
-            height=28,
-            corner_radius=8,
+            width=32,
+            height=32,
+            corner_radius=16,
             fg_color="transparent",
             hover_color=TRACK,
             text_color=MUTED,
@@ -762,23 +833,21 @@ class LetterboxdToUwufufuApp:
             row,
             text="×",
             command=lambda: self.remove_csv(path),
-            width=28,
-            height=28,
-            corner_radius=8,
+            width=32,
+            height=32,
+            corner_radius=16,
             fg_color="transparent",
             hover_color=TRACK,
             text_color=MUTED,
             font=self.icon_font
         )
-        remove_btn.grid(row=0, column=4, rowspan=2, padx=(8, 10))
+        remove_btn.grid(row=0, column=4, rowspan=2, padx=(4, 12))
 
         self.file_rows[path] = row, check, name
         self._make_clickable(
             row,
             lambda: self.toggle_csv(path),
-            lambda hover: row.configure(
-                border_color=self._row_border(path, hover)
-            ),
+            lambda hover: row.configure(fg_color=self._row_fill(path, hover)),
             skip=(check, open_btn, remove_btn)
         )
         self._style_row(path)
@@ -793,17 +862,14 @@ class LetterboxdToUwufufuApp:
         else:
             check.deselect()
 
-        row.configure(
-            fg_color=CARD_SELECTED if selected else CARD,
-            border_color=self._row_border(path, pointer_inside(row))
-        )
+        row.configure(fg_color=self._row_fill(path, pointer_inside(row)))
         name.configure(text_color=INK if selected else MUTED)
 
-    def _row_border(self, path, hover):
-        # Selected rows keep their blue border, the others light up on hover
+    def _row_fill(self, path, hover):
+        # Rows are borderless cards that darken a little on hover
         if path in self.selection:
-            return PRIMARY
-        return INPUT_BORDER if hover else BORDER
+            return CARD_SELECTED_HOVER if hover else CARD_SELECTED
+        return CARD_HOVER if hover else CARD
 
     def show_csv(self, path):
         try:
@@ -907,43 +973,14 @@ class LetterboxdToUwufufuApp:
 
     def _build_panel(self):
         content = ctk.CTkFrame(self.panel, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=20, pady=(20, 18))
-
-        header = ctk.CTkFrame(content, fg_color="transparent")
-        header.pack(fill="x")
-
-        self._label(header, "Letterboxd to UwUFUFU", self.title_font).pack(
-            side="left"
+        content.pack(
+            fill="both",
+            expand=True,
+            padx=PANEL_PADDING,
+            pady=PANEL_PADDING
         )
 
-        # The button only lays out an image it is created with, so start
-        # with the icon for the current theme (see _show_theme_icon)
-        dark = ctk.get_appearance_mode() == "Dark"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.theme_btn = ctk.CTkButton(
-                header,
-                text="",
-                image=self._theme_icon(0 if dark else THEME_ICON_FRAMES),
-                command=self.toggle_theme,
-                width=32,
-                height=32,
-                corner_radius=8,
-                fg_color="transparent",
-                hover_color=TRACK
-            )
-        self.theme_btn.pack(side="right")
-
-        self._label(
-            content,
-            "Build a UwUFUFU bracket tournament from your "
-            "Letterboxd CSV exports.",
-            self.body_font,
-            MUTED,
-            wraplength=PANEL_WIDTH - 40
-        ).pack(fill="x", pady=(2, 0))
-
-        body = self._step(content, 1, "Files")
+        body = self._step(content, "Files")
         self.files_summary = self._label(body, "", self.body_font)
         self.files_summary.pack(fill="x")
         self._label(
@@ -953,7 +990,7 @@ class LetterboxdToUwufufuApp:
             DIMMED
         ).pack(fill="x", pady=(2, 0))
 
-        body = self._step(content, 2, "Settings")
+        body = self._step(content, "Settings")
         self._label(body, "Combine files", self.label_font).pack(fill="x")
 
         self.mode_selector = self._segmented(
@@ -982,7 +1019,7 @@ class LetterboxdToUwufufuApp:
         self.quality_help.pack(fill="x", pady=(4, 0))
         self._update_quality_help()
 
-        body = self._step(content, 3, "UwUFUFU account")
+        body = self._step(content, "UwUFUFU account")
         self._label(body, "Email", self.label_font).pack(fill="x")
 
         self.email_entry = self._entry(body, placeholder_text="you@example.com")
@@ -991,25 +1028,33 @@ class LetterboxdToUwufufuApp:
         if email := os.getenv("email"):
             self.email_entry.insert(0, email)
 
-        pass_head = ctk.CTkFrame(body, fg_color="transparent")
-        pass_head.pack(fill="x")
-        self._label(pass_head, "Password", self.label_font).pack(side="left")
-
-        self.pass_toggle = ctk.CTkButton(
-            pass_head,
-            text="Show",
-            command=self._toggle_password,
-            width=0,
-            height=0,
-            fg_color="transparent",
-            hover=False,
-            text_color=LINK,
-            font=self.small_font
-        )
-        self.pass_toggle.pack(side="right")
+        self._label(body, "Password", self.label_font).pack(fill="x")
 
         self.pass_entry = self._entry(body, show="•")
         self.pass_entry.pack(fill="x", pady=(4, 0))
+
+        # The eye sits inside the field, on the right
+        self.password_visible = False
+        self.pass_toggle = ctk.CTkButton(
+            self.pass_entry,
+            text=self.eye_icons[False],
+            command=self._toggle_password,
+            width=28,
+            height=28,
+            fg_color=INPUT_BG,
+            bg_color=INPUT_BG,
+            hover=False,
+            text_color=MUTED,
+            font=self.eye_font
+        )
+        self.pass_toggle.place(relx=1, rely=0.5, x=-8, anchor="e")
+
+        # Keep typed text clear of the eye. CustomTkinter only resets this
+        # padding when the display scaling changes
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.root)
+        self.pass_entry._entry.grid_configure(
+            padx=(round(12 * scaling), round(44 * scaling))
+        )
 
         if encrypted := os.getenv("password"):
             try:
@@ -1024,15 +1069,15 @@ class LetterboxdToUwufufuApp:
             content,
             text=START_TEXT,
             command=self.start_process,
-            height=40,
-            corner_radius=8,
+            height=48,
+            corner_radius=24,
             text_color_disabled=DIMMED,
             font=self.button_font,
             **PRIMARY_STYLE
         )
-        self.start_btn.pack(fill="x", pady=(16, 0))
+        self.start_btn.pack(fill="x", pady=(20, 0))
 
-        body = self._step(content, 4, "Review")
+        body = self._step(content, "Review")
         status = ctk.CTkFrame(body, fg_color="transparent")
         status.pack(fill="x")
 
@@ -1047,31 +1092,23 @@ class LetterboxdToUwufufuApp:
         # Starts track-coloured: an empty bar would still draw a dot
         self.progress = ctk.CTkProgressBar(
             body,
-            height=6,
-            corner_radius=3,
+            height=8,
+            corner_radius=4,
             fg_color=TRACK,
             progress_color=TRACK
         )
         self.progress.set(0)
         self.progress.pack(fill="x", pady=(10, 0))
 
-    def _step(self, parent, number, title):
-        ctk.CTkFrame(
-            parent,
-            height=1,
-            corner_radius=0,
-            fg_color=BORDER
-        ).pack(fill="x", pady=(14, 12))
-
-        head = ctk.CTkFrame(parent, fg_color="transparent")
-        head.pack(fill="x")
-        self._label(
-            head, str(number), self.heading_font, DIMMED, width=22
-        ).pack(side="left")
-        self._label(head, title, self.heading_font).pack(side="left")
+    def _step(self, parent, title):
+        # Whitespace, not rules, separates the steps
+        first = not parent.winfo_children()
+        self._label(parent, title, self.heading_font).pack(
+            fill="x", pady=(0 if first else 24, 0)
+        )
 
         body = ctk.CTkFrame(parent, fg_color="transparent")
-        body.pack(fill="x", padx=(22, 0), pady=(8, 0))
+        body.pack(fill="x", pady=(8, 0))
         return body
 
     def _selected_mode(self):
@@ -1099,9 +1136,11 @@ class LetterboxdToUwufufuApp:
         )
 
     def _toggle_password(self):
-        hidden = self.pass_toggle.cget("text") == "Show"
-        self.pass_entry.configure(show="" if hidden else "•")
-        self.pass_toggle.configure(text="Hide" if hidden else "Show")
+        self.password_visible = not self.password_visible
+        self.pass_entry.configure(show="" if self.password_visible else "•")
+        self.pass_toggle.configure(
+            text=self.eye_icons[self.password_visible]
+        )
 
     # ---- Log and progress ---------------------------------------------------
 

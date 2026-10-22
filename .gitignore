@@ -17,3 +17,4 @@ dist/
 
 #TMDB api key
 config.py
+DESIGN.md
