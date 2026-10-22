@@ -45,31 +45,24 @@ THEMES = ("light", "dark", "system")
 # the uploads just share the same upload bandwidth
 UPLOAD_WORKERS = 4
 
-# Layout: a 3x2 workbench of file cards on the left, a tool panel on the right
-GRID_COLUMNS = 3
-GRID_ROWS = 2
-MAX_CSV_FILES = GRID_COLUMNS * GRID_ROWS
+# Layout: a scrolling list of files on the left, a tool panel on the right
+VIEW_WIDTH = 544
+VIEW_HEIGHT = 414
 PANEL_WIDTH = 360
-CARD_WIDTH = 172
-CARD_HEIGHT = 200
-CARD_GAP = 14
+ROW_GAP = 8
+ROW_PADDING = 14
 WORKBENCH_PADDING = 24
-GRID_WIDTH = GRID_COLUMNS * CARD_WIDTH + (GRID_COLUMNS - 1) * CARD_GAP
-GRID_HEIGHT = GRID_ROWS * CARD_HEIGHT + (GRID_ROWS - 1) * CARD_GAP
-WINDOW_WIDTH = GRID_WIDTH + 2 * WORKBENCH_PADDING + 1 + PANEL_WIDTH
+WINDOW_WIDTH = VIEW_WIDTH + 2 * WORKBENCH_PADDING + 1 + PANEL_WIDTH
 
-# Palette modelled on Stirling PDF's light and dark themes: (light, dark)
 PAPER = ("#f5f4f1", "#141416")
 SURFACE = ("#fafafa", "#1a1a1d")
 CARD = ("#ffffff", "#202023")
+CARD_SELECTED = ("#eff6ff", "#232c3c")
 INPUT_BG = ("#ffffff", "#141416")
-THUMB = ("#f0efeb", "#18181b")
-PAGE = ("#ffffff", "#27272a")
 TRACK = ("#e9e7e2", "#27272a")
 TRACK_HOVER = ("#dfddd7", "#333338")
 SELECTED = ("#ffffff", "#3f3f46")
 BORDER = ("#e5e7eb", "#28282d")
-SLOT_BORDER = ("#e6e4df", "#1f1f23")
 INPUT_BORDER = ("#d1d5db", "#3f3f46")
 INK = ("#373530", "#fafafa")
 MUTED = ("#4b5563", "#a1a1aa")
@@ -226,6 +219,12 @@ def clip(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
+def pointer_inside(widget):
+    # winfo_containing gives the innermost widget, which may be a child
+    inside = str(widget.winfo_containing(*widget.winfo_pointerxy()))
+    return inside == str(widget) or inside.startswith(f"{widget}.")
+
+
 def save_setting(key, value):
     lines = []
     if CONFIG_FILE.exists():
@@ -236,14 +235,16 @@ def save_setting(key, value):
     CONFIG_FILE.write_text("\n".join(lines + [f"{key}={value}"]) + "\n")
 
 
-def open_with_default_app(path):
-    """Open a file the way double-clicking it in the file manager would."""
+def show_in_file_manager(path):
+    """Open the folder holding a file, with the file selected if possible."""
     if os.name == "nt":
-        os.startfile(path)
+        # Explorer only understands backslashes, and wants the path quoted
+        # right after the comma
+        subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
     elif sys.platform == "darwin":
-        subprocess.Popen(["open", path])
+        subprocess.Popen(["open", "-R", path])
     else:
-        subprocess.Popen(["xdg-open", path])
+        subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
 
 class LetterboxdToUwufufuApp:
@@ -260,15 +261,28 @@ class LetterboxdToUwufufuApp:
 
         self.stop_event = threading.Event()
         self.previews = {}
+        self.file_rows = {}
         self.theme = SAVED_THEME
         self.theme_icons = {}
         self.icon_animation = 0
         self._build_fonts()
 
-        saved = os.getenv("csv_paths") or os.getenv("csv_path") or ""
-        self.csv_paths = [
-            p for p in saved.split(CSV_PATHS_SEPARATOR) if p
-        ][:MAX_CSV_FILES]
+        # An empty csv_paths means every file was removed, so only fall back
+        # to the older csv_path setting when there is none
+        saved = os.getenv("csv_paths")
+        if saved is None:
+            saved = os.getenv("csv_path") or ""
+        self.csv_paths = [p for p in saved.split(CSV_PATHS_SEPARATOR) if p]
+
+        # The files ticked for the tournament. Settings saved before files
+        # could be unticked used every file listed
+        selected = os.getenv("csv_selected")
+        if selected is None:
+            self.selection = set(self.csv_paths)
+        else:
+            self.selection = (
+                set(selected.split(CSV_PATHS_SEPARATOR)) & set(self.csv_paths)
+            )
 
         mode = os.getenv("csv_mode")
         if mode not in parser.COMBINE_MODES:
@@ -326,8 +340,20 @@ class LetterboxdToUwufufuApp:
         self.button_font = strong(14)
         self.body_font = ctk.CTkFont(family=family, size=13)
         self.small_font = ctk.CTkFont(family=family, size=12)
-        self.preview_font = ctk.CTkFont(family=family, size=10)
+        self.icon_font = ctk.CTkFont(family=family, size=18)
         self.mono_font = ctk.CTkFont(family=MONO_FONT, size=12)
+
+        # The File Explorer folder from Windows' icon font (11, then 10);
+        # other systems get a word instead
+        if "Segoe Fluent Icons" in families:
+            self.folder_icon = ""
+            self.folder_font = ctk.CTkFont(family="Segoe Fluent Icons", size=15)
+        elif "Segoe MDL2 Assets" in families:
+            self.folder_icon = ""
+            self.folder_font = ctk.CTkFont(family="Segoe MDL2 Assets", size=15)
+        else:
+            self.folder_icon = "Show"
+            self.folder_font = self.small_font
 
     def _resize_window(self):
         self.root.update_idletasks()
@@ -464,6 +490,27 @@ class LetterboxdToUwufufuApp:
         )
         return entry
 
+    def _checkbox(self, parent, text, command):
+        # No hover effect: CustomTkinter fills an unticked box with the hover
+        # colour, which looks ticked
+        return ctk.CTkCheckBox(
+            parent,
+            text=text,
+            command=command,
+            width=0,
+            checkbox_width=16,
+            checkbox_height=16,
+            corner_radius=8,  # half the size, so the box is a circle
+            border_width=2,
+            hover=False,
+            fg_color=PRIMARY,
+            border_color=INPUT_BORDER,
+            checkmark_color=WHITE,
+            text_color=INK,
+            text_color_disabled=DIMMED,
+            font=self.body_font
+        )
+
     # ---- Workbench ----------------------------------------------------------
 
     def _build_workbench(self):
@@ -489,8 +536,8 @@ class LetterboxdToUwufufuApp:
 
         area = ctk.CTkFrame(
             self.workbench,
-            width=GRID_WIDTH,
-            height=GRID_HEIGHT,
+            width=VIEW_WIDTH,
+            height=VIEW_HEIGHT,
             fg_color="transparent"
         )
         area.pack(
@@ -501,7 +548,8 @@ class LetterboxdToUwufufuApp:
         )
         area.pack_propagate(False)
 
-        self.file_grid = ctk.CTkFrame(area, fg_color="transparent")
+        self.file_view = ctk.CTkFrame(area, fg_color="transparent")
+        self._build_file_view()
 
         self.log_area = ctk.CTkTextbox(
             area,
@@ -518,8 +566,70 @@ class LetterboxdToUwufufuApp:
         )
         self._append_log("Activity will appear here.", "placeholder")
 
-        self.views = {"Files": self.file_grid, "Activity": self.log_area}
+        self.views = {"Files": self.file_view, "Activity": self.log_area}
         self._show_view("Files")
+
+    def _build_file_view(self):
+        toolbar = ctk.CTkFrame(self.file_view, fg_color="transparent")
+        toolbar.pack(fill="x", pady=(0, 12))
+
+        # Lined up with the checkboxes of the rows below
+        self.select_all_box = self._checkbox(
+            toolbar, "Select all", self.toggle_all
+        )
+        self.select_all_box.pack(side="left", padx=(ROW_PADDING + 1, 0))
+
+        ctk.CTkButton(
+            toolbar,
+            text="Add CSV",
+            command=self.browse_files,
+            width=96,
+            height=32,
+            corner_radius=8,
+            font=self.label_font,
+            **PRIMARY_STYLE
+        ).pack(side="right")
+
+        self.file_list = ctk.CTkScrollableFrame(
+            self.file_view,
+            corner_radius=0,
+            fg_color="transparent",
+            scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=INPUT_BORDER
+        )
+        # Re-check the scrollbar when the rows or the space for them change
+        self.file_list.bind("<Configure>", self._fit_scrollbar, add="+")
+        self.file_list._parent_canvas.bind(
+            "<Configure>", self._fit_scrollbar, add="+"
+        )
+
+        # Stands in for the list until a file is added
+        self.empty_state = ctk.CTkFrame(
+            self.file_view,
+            corner_radius=12,
+            border_width=1,
+            fg_color=SURFACE,
+            border_color=BORDER
+        )
+        message = ctk.CTkFrame(self.empty_state, fg_color="transparent")
+        message.place(relx=0.5, rely=0.5, anchor="center")
+
+        self._label(message, "No CSV files yet", self.heading_font).pack()
+        self._label(
+            message,
+            "Click here or on Add CSV to choose\nyour Letterboxd exports.",
+            self.small_font,
+            DIMMED,
+            justify="center"
+        ).pack(pady=(4, 0))
+
+        self._make_clickable(
+            self.empty_state,
+            self.browse_files,
+            lambda hover: self.empty_state.configure(
+                border_color=PRIMARY if hover else BORDER
+            )
+        )
 
     def _show_view(self, name):
         self.view.set(name)
@@ -529,94 +639,63 @@ class LetterboxdToUwufufuApp:
             else:
                 widget.pack_forget()
 
+    def _fit_scrollbar(self, _=None):
+        # CTkScrollableFrame (5.2.2) always shows its scrollbar, so hide it
+        # while every row fits
+        canvas = self.file_list._parent_canvas
+        if self.file_list.winfo_reqheight() > canvas.winfo_height():
+            self.file_list._scrollbar.grid()
+        else:
+            self.file_list._scrollbar.grid_remove()
+            canvas.yview_moveto(0)
+
     def _refresh_files(self):
-        for child in self.file_grid.winfo_children():
+        for child in self.file_list.winfo_children():
             child.destroy()
+        self.file_rows.clear()
 
-        # Every slot of the grid is always filled, so the cards stretch
-        # evenly over the whole workbench
-        rows = []
-        for i in range(GRID_ROWS):
-            row = ctk.CTkFrame(self.file_grid, fg_color="transparent")
-            row.pack(fill="both", expand=True, pady=(CARD_GAP if i else 0, 0))
-            rows.append(row)
+        for path in self.csv_paths:
+            self._file_row(path)
 
-        count = len(self.csv_paths)
-        for i in range(MAX_CSV_FILES):
-            row, column = divmod(i, GRID_COLUMNS)
+        if self.csv_paths:
+            self.empty_state.pack_forget()
+            self.file_list.pack(fill="both", expand=True)
+        else:
+            self.file_list.pack_forget()
+            self.empty_state.pack(fill="both", expand=True)
 
-            if i < count:
-                card = self._file_card(rows[row], self.csv_paths[i])
-            elif i == count:
-                card = self._add_card(rows[row])
-            else:
-                card = self._empty_slot(rows[row])
-
-            card.pack(
-                side="left",
-                fill="both",
-                expand=True,
-                padx=(CARD_GAP if column else 0, 0)
-            )
-
-        self.file_count_label.configure(text=f"{count} of {MAX_CSV_FILES} files")
-        self.files_summary.configure(
-            text=f"{count} file{'s' if count != 1 else ''} selected"
-            if count else "No files selected",
-            text_color=INK if count else DIMMED
-        )
-
-        self.mode_selector.configure(
-            state=tk.NORMAL if count > 1 else tk.DISABLED
-        )
-        self._update_mode_help()
+        self._update_selection()
 
     def _preview(self, path):
-        """Return the movies in a CSV (for the card preview) and any problem."""
+        """Return the movies in a CSV and any problem that stops its use."""
         if not os.path.isfile(path):
             return [], "File not found"
 
-        if path not in self.previews:
+        # Keyed by modification time, so a file edited since is read again
+        key = path, os.path.getmtime(path)
+        if key not in self.previews:
             try:
                 movies = parser.extract_movies(path)
-                self.previews[path] = (
+                self.previews[key] = (
                     movies,
                     None if movies else "No movies found"
                 )
             except (Exception, SystemExit):
-                self.previews[path] = ([], "Can't read this file")
+                self.previews[key] = ([], "Can't read this file")
 
-        return self.previews[path]
+        return self.previews[key]
 
-    def _card_frame(self, parent, **kwargs):
-        options = {
-            "width": CARD_WIDTH,
-            "height": CARD_HEIGHT,
-            "corner_radius": 12,
-            "border_width": 1,
-            "border_color": BORDER
-        }
-        options.update(kwargs)
-        card = ctk.CTkFrame(parent, **options)
-        card.pack_propagate(False)
-        return card
-
-    def _make_clickable(self, card, command, skip=()):
-        def enter(_):
-            card.configure(border_color=PRIMARY)
-
+    def _make_clickable(self, card, command, hover, skip=()):
         def leave(_):
             # Moving onto a child widget also fires <Leave>, so only reset
             # once the pointer has really left the card
-            inside = card.winfo_containing(*card.winfo_pointerxy())
-            name = str(inside)
-            if not (name == str(card) or name.startswith(f"{card}.")):
-                card.configure(border_color=BORDER)
+            if not pointer_inside(card):
+                hover(False)
 
         def bind(widget):
             if widget in skip:
                 return
-            tk.Misc.bind(widget, "<Enter>", enter, add="+")
+            tk.Misc.bind(widget, "<Enter>", lambda _: hover(True), add="+")
             tk.Misc.bind(widget, "<Leave>", leave, add="+")
             tk.Misc.bind(widget, "<Button-1>", lambda _: command(), add="+")
             for child in widget.winfo_children():
@@ -625,122 +704,112 @@ class LetterboxdToUwufufuApp:
         bind(card)
         tk.Frame.configure(card, cursor="hand2")
 
-    def _file_card(self, parent, path):
+    def _file_row(self, path):
         movies, problem = self._preview(path)
-        card = self._card_frame(parent, fg_color=CARD)
+        account = parser.export_account(path)
 
-        # Packed bottom-up so the thumbnail takes whatever height is left
-        self._label(
-            card,
-            problem or f"{len(movies)} movies",
-            self.small_font,
-            DANGER if problem else MUTED
-        ).pack(side="bottom", fill="x", padx=12, pady=(2, 12))
-
-        self._label(
-            card,
-            clip(os.path.basename(path), 22),
-            self.label_font
-        ).pack(side="bottom", fill="x", padx=12)
-
-        # A page-like thumbnail listing the first titles in the file
-        thumb = ctk.CTkFrame(
-            card,
-            width=10,
-            height=10,
-            corner_radius=8,
-            fg_color=THUMB
-        )
-        thumb.pack(fill="both", expand=True, padx=8, pady=(8, 10))
-        thumb.pack_propagate(False)
-
-        page = ctk.CTkFrame(
-            thumb,
-            width=10,
-            height=10,
-            corner_radius=4,
-            border_width=1,
-            border_color=BORDER,
-            fg_color=PAGE
-        )
-        page.pack(fill="both", expand=True, padx=24, pady=(16, 0))
-        page.pack_propagate(False)
-
-        for movie in movies[:16]:
-            self._label(
-                page,
-                clip(movie["title"], 18),
-                self.preview_font,
-                PREVIEW_TEXT
-            ).pack(fill="x", padx=8, pady=(4, 0))
-
-        remove_btn = ctk.CTkButton(
-            card,
-            text="×",
-            command=lambda: self.remove_csv(path),
-            width=24,
-            height=24,
-            corner_radius=12,
+        row = ctk.CTkFrame(
+            self.file_list,
+            corner_radius=10,
             border_width=1,
             fg_color=CARD,
-            hover_color=SURFACE,
-            border_color=BORDER,
-            bg_color=THUMB,
-            text_color=MUTED,
-            font=self.body_font
+            border_color=BORDER
         )
-        remove_btn.place(relx=1, x=-14, y=14, anchor="ne")
+        row.pack(fill="x", pady=(0, ROW_GAP))
+        row.grid_columnconfigure(1, weight=1)
 
-        if os.path.isfile(path):
-            self._make_clickable(
-                card,
-                lambda: self.open_csv(path),
-                skip=(remove_btn,)
-            )
+        # The box keeps 6px free on its right for a label it doesn't have
+        check = self._checkbox(row, "", lambda: self.toggle_csv(path))
+        check.grid(row=0, column=0, rowspan=2, padx=(ROW_PADDING, 6))
 
-        return card
-
-    def _add_card(self, parent):
-        card = self._card_frame(parent, fg_color=SURFACE)
-
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.place(relx=0.5, rely=0.5, anchor="center")
-
-        add_btn = ctk.CTkButton(
-            inner,
-            text="Add CSV",
-            command=self.browse_files,
-            width=110,
-            height=34,
-            corner_radius=8,
-            font=self.label_font,
-            **PRIMARY_STYLE
+        name = self._label(
+            row, clip(os.path.basename(path), 40), self.label_font
         )
-        add_btn.pack()
+        name.grid(row=0, column=1, sticky="ew", pady=(12, 0))
 
         self._label(
-            inner,
-            f"Up to {MAX_CSV_FILES} Letterboxd\nexports",
+            row,
+            f"Letterboxd account: {account or 'unknown'}",
             self.small_font,
-            DIMMED,
-            justify="center"
-        ).pack(pady=(10, 0))
+            MUTED if account else DIMMED
+        ).grid(row=1, column=1, sticky="ew", pady=(2, 12))
 
-        self._make_clickable(card, self.browse_files, skip=(add_btn,))
-        return card
+        count = len(movies)
+        self._label(
+            row,
+            problem or f"{count} movie{'s' if count != 1 else ''}",
+            self.small_font,
+            DANGER if problem else MUTED
+        ).grid(row=0, column=2, rowspan=2, padx=(12, 0))
 
-    def _empty_slot(self, parent):
-        return self._card_frame(
-            parent,
+        open_btn = ctk.CTkButton(
+            row,
+            text=self.folder_icon,
+            command=lambda: self.show_csv(path),
+            state=tk.NORMAL if os.path.isfile(path) else tk.DISABLED,
+            width=28,
+            height=28,
+            corner_radius=8,
             fg_color="transparent",
-            border_color=SLOT_BORDER
+            hover_color=TRACK,
+            text_color=MUTED,
+            text_color_disabled=PREVIEW_TEXT,
+            font=self.folder_font
         )
+        open_btn.grid(row=0, column=3, rowspan=2, padx=(12, 0))
 
-    def open_csv(self, path):
+        remove_btn = ctk.CTkButton(
+            row,
+            text="×",
+            command=lambda: self.remove_csv(path),
+            width=28,
+            height=28,
+            corner_radius=8,
+            fg_color="transparent",
+            hover_color=TRACK,
+            text_color=MUTED,
+            font=self.icon_font
+        )
+        remove_btn.grid(row=0, column=4, rowspan=2, padx=(8, 10))
+
+        self.file_rows[path] = row, check, name
+        self._make_clickable(
+            row,
+            lambda: self.toggle_csv(path),
+            lambda hover: row.configure(
+                border_color=self._row_border(path, hover)
+            ),
+            skip=(check, open_btn, remove_btn)
+        )
+        self._style_row(path)
+
+    def _style_row(self, path):
+        """Show whether a file goes into the tournament."""
+        row, check, name = self.file_rows[path]
+        selected = path in self.selection
+
+        if selected:
+            check.select()
+        else:
+            check.deselect()
+
+        row.configure(
+            fg_color=CARD_SELECTED if selected else CARD,
+            border_color=self._row_border(path, pointer_inside(row))
+        )
+        name.configure(text_color=INK if selected else MUTED)
+
+    def _row_border(self, path, hover):
+        # Selected rows keep their blue border, the others light up on hover
+        if path in self.selection:
+            return PRIMARY
+        return INPUT_BORDER if hover else BORDER
+
+    def show_csv(self, path):
         try:
-            open_with_default_app(path)
+            show_in_file_manager(path)
         except OSError as e:
-            messagebox.showerror("Can't Open File", f"{path}\n\n{e}")
+            messagebox.showerror("Can't Open Folder", f"{path}\n\n{e}")
 
     def browse_files(self):
         filenames = filedialog.askopenfilenames(
@@ -750,17 +819,89 @@ class LetterboxdToUwufufuApp:
             ]
         )
 
+        # New files start unselected, so adding one never changes what
+        # already goes into the tournament
         for filename in filenames:
-            if len(self.csv_paths) >= MAX_CSV_FILES:
-                break
             if filename not in self.csv_paths:
                 self.csv_paths.append(filename)
 
         self._refresh_files()
+        self._save_files()
 
     def remove_csv(self, path):
         self.csv_paths.remove(path)
+        self.selection.discard(path)
         self._refresh_files()
+        self._save_files()
+
+    def toggle_csv(self, path):
+        if path in self.selection:
+            self.selection.remove(path)
+        else:
+            self.selection.add(path)
+        self._style_row(path)
+        self._update_selection()
+        self._save_files()
+
+    def _save_files(self):
+        # Saved on every change, so the list survives closing the app
+        # without creating a tournament
+        save_setting("csv_paths", CSV_PATHS_SEPARATOR.join(self.csv_paths))
+        save_setting(
+            "csv_selected",
+            CSV_PATHS_SEPARATOR.join(self._selected_paths())
+        )
+
+    def toggle_all(self):
+        # Selects every file, or none once they all are
+        if self.selection == set(self.csv_paths):
+            self.selection = set()
+        else:
+            self.selection = set(self.csv_paths)
+
+        for path in self.csv_paths:
+            self._style_row(path)
+        self._update_selection()
+        self._save_files()
+
+    def _selected_paths(self):
+        # In list order, which is the order the files are combined in
+        return [path for path in self.csv_paths if path in self.selection]
+
+    def _update_selection(self):
+        count = len(self._selected_paths())
+        total = len(self.csv_paths)
+
+        # A click ticks the box by itself, so follow the selection instead
+        if total and count == total:
+            self.select_all_box.select()
+        else:
+            self.select_all_box.deselect()
+        self.select_all_box.configure(
+            state=tk.NORMAL if total else tk.DISABLED
+        )
+
+        self.file_count_label.configure(
+            text=f"{count} of {total} selected" if total else ""
+        )
+
+        if not total:
+            summary = "No files added"
+        elif not count:
+            summary = "No files selected"
+        else:
+            summary = (
+                f"{count} of {total} file{'s' if total != 1 else ''} selected"
+            )
+        self.files_summary.configure(
+            text=summary,
+            text_color=INK if count else DIMMED
+        )
+
+        self.mode_selector.configure(
+            state=tk.NORMAL if count > 1 else tk.DISABLED
+        )
+        self._update_mode_help()
 
     # ---- Tool panel ---------------------------------------------------------
 
@@ -807,7 +948,7 @@ class LetterboxdToUwufufuApp:
         self.files_summary.pack(fill="x")
         self._label(
             body,
-            "Click a file in the workbench to open it.",
+            "Only the selected files go into the tournament.",
             self.small_font,
             DIMMED
         ).pack(fill="x", pady=(2, 0))
@@ -940,10 +1081,10 @@ class LetterboxdToUwufufuApp:
         )
 
     def _update_mode_help(self):
-        if len(self.csv_paths) > 1:
+        if len(self._selected_paths()) > 1:
             text = MODE_HELP[self._selected_mode()]
         else:
-            text = "Add another file to combine them."
+            text = "Select two or more files to combine them."
         self.mode_help.configure(text=text)
 
     def _selected_quality(self):
@@ -998,17 +1139,25 @@ class LetterboxdToUwufufuApp:
     # ---- Conversion ---------------------------------------------------------
 
     def start_process(self):
-        csv_paths = list(self.csv_paths)
+        # Unselected files are left out of every check and of the tournament
+        csv_paths = self._selected_paths()
         mode = self._selected_mode()
         quality = self._selected_quality()
         email = self.email_entry.get().strip()
         password = self.pass_entry.get().strip()
 
-        if not all((csv_paths, email, password)):
+        if not csv_paths:
+            messagebox.showerror(
+                "No Files Selected",
+                "Select at least one CSV file under Files to include it "
+                "in the tournament."
+            )
+            return
+
+        if not all((email, password)):
             messagebox.showerror(
                 "Missing Fields",
-                "Please fill in all fields "
-                "(at least one CSV file, Email, and Password)."
+                "Please fill in all fields (Email and Password)."
             )
             return
 
@@ -1018,6 +1167,14 @@ class LetterboxdToUwufufuApp:
                 "File Not Found",
                 "The following CSV files could not be found:\n"
                 + "\n".join(missing)
+            )
+            return
+
+        if not any(self._preview(path)[0] for path in csv_paths):
+            messagebox.showerror(
+                "No Movies Found",
+                "None of the selected CSV files contains any movies. "
+                "Select a Letterboxd export with at least one movie."
             )
             return
 
@@ -1037,7 +1194,8 @@ class LetterboxdToUwufufuApp:
         CONFIG_FILE.write_text(
             f"email={email}\n"
             f"password={encrypted_password}\n"
-            f"csv_paths={CSV_PATHS_SEPARATOR.join(csv_paths)}\n"
+            f"csv_paths={CSV_PATHS_SEPARATOR.join(self.csv_paths)}\n"
+            f"csv_selected={CSV_PATHS_SEPARATOR.join(csv_paths)}\n"
             f"csv_mode={mode}\n"
             f"poster_quality={quality}\n"
             f"theme={self.theme}\n"

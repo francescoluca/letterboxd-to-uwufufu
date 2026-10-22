@@ -1,9 +1,27 @@
 import csv
+import re
 import sys
+from pathlib import Path
 
 UNION = "union"
 INTERSECTION = "intersection"
 COMBINE_MODES = (UNION, INTERSECTION)
+
+# Letterboxd names its data export letterboxd-<username>-<yyyy-mm-dd-hh-mm>-utc
+# and unzipping it gives a folder with the same name
+EXPORT_FOLDER = re.compile(r"letterboxd-([\w-]+)-\d{4}(?:-\d{2}){4}-utc")
+
+
+def export_account(csv_path):
+    """Return the Letterboxd username of the export a CSV belongs to.
+
+    Only an export folder says whose data it holds, so a CSV anywhere else
+    (or in a renamed folder) gives None rather than a guess.
+    """
+    for folder in Path(csv_path).parents:
+        if match := EXPORT_FOLDER.fullmatch(folder.name):
+            return match[1]
+    return None
 
 
 def _movie_key(movie):
