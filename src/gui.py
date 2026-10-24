@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import math
 import time
@@ -18,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import customtkinter as ctk
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
+from tkinterdnd2 import TkinterDnD, DND_FILES, COPY
 
 from src import tmdb, uwufufu, parser
 from src.config import ENCRYPTION_KEY
@@ -57,42 +59,47 @@ WORKBENCH_PADDING = 24
 WINDOW_WIDTH = VIEW_WIDTH + 3 * WORKBENCH_PADDING + PANEL_WIDTH
 
 # Colours follow DESIGN.md: white cards on a sage canvas, near-black ink and
-# a single lime-green accent kept for primary actions. Dark mode flips the
+# no colour accent: primary actions are solid ink. Dark mode flips the
 # canvas to ink, as the design's dark bands do
 PAPER = ("#e8ebe6", "#0e0f0c")
 CARD = ("#ffffff", "#1b1d19")
 CARD_HOVER = ("#f3f5f1", "#22251f")
-CARD_SELECTED = ("#e2f6d5", "#1d2a14")
-CARD_SELECTED_HOVER = ("#d6f1c4", "#24331a")
+CARD_SELECTED = ("#eceee9", "#262823")
+CARD_SELECTED_HOVER = ("#e2e5df", "#2d302a")
 # Nothing has a border, so inputs are sage fills on the white card
 INPUT_BG = ("#e8ebe6", "#0e0f0c")
 INPUT_FOCUS = ("#dde1da", "#000000")
 TRACK = ("#e8ebe6", "#2a2d27")
 TRACK_HOVER = ("#dde1da", "#353831")
-SELECTED = ("#c5edab", "#163300")
+SELECTED = ("#d4d7d1", "#3a3d36")
 SCROLLBAR = ("#c6cac2", "#3a3d36")
 INPUT_BORDER = ("#868685", "#5b5d58")
 INK = ("#0e0f0c", "#e8ebe6")
 MUTED = ("#454745", "#b4b6b2")
 DIMMED = ("#868685", "#868685")
 PREVIEW_TEXT = ("#a8aaa6", "#5b5d58")
-PRIMARY = ("#9fe870", "#9fe870")
-PRIMARY_HOVER = ("#cdffad", "#cdffad")
-ON_PRIMARY = ("#0e0f0c", "#0e0f0c")
+PRIMARY = ("#0e0f0c", "#e8ebe6")
+PRIMARY_HOVER = ("#2a2d27", "#ffffff")
+ON_PRIMARY = ("#ffffff", "#0e0f0c")
 SUCCESS = ("#2ead4b", "#2ead4b")
 WARNING = ("#b86700", "#ffd11a")
 DANGER = ("#d03238", "#ff6b70")
 DANGER_SUBTLE = ("#e8ebe6", "#320707")
 DANGER_HOVER = ("#dde1da", "#451010")
 ICON_TILE = "#0e0f0c"
-ICON_MARK = "#9fe870"
-SUN = "#9fe870"
+ICON_MARK = "#ffffff"
+SUN = "#e8ebe6"
 MOON = "#0e0f0c"
 
 # The theme button morphs between a sun (frame 0) and a moon (last frame)
 THEME_ICON_SIZE = 20
 THEME_ICON_FRAMES = 16
 THEME_ICON_FRAME_MS = 16
+
+# The tick, folder and cross are drawn like the theme icon, with strokes about
+# as thick as the sun's rays
+ICON_SIZE = 18
+ICON_STROKE = 0.045  # half a stroke's width
 
 MONO_FONT = {"nt": "Consolas"}.get(os.name, "Menlo")
 DWMWA_CAPTION_COLOR = 35
@@ -128,7 +135,7 @@ class ConversionStopped(Exception):
 
 
 def render_icon(size=64, radius=14):
-    """A tournament bracket, lime green on an ink rounded tile."""
+    """A tournament bracket, white on an ink rounded tile."""
     image = tk.PhotoImage(width=size, height=size)
 
     for y in range(size):
@@ -172,11 +179,42 @@ def _segment_distance(px, py, ax, ay, bx, by):
     return math.hypot(px - ax - dx * h, py - ay - dy * h)
 
 
+def sdf_pixels(size, layers):
+    """
+    RGBA rows of shapes given as signed distance fields, which gives
+    anti-aliased edges without supersampling. Each layer is a distance
+    function over the unit square and the colour to fill it with, painted
+    over the layers before it.
+    """
+    layers = [
+        (distance, [int(color[i:i + 2], 16) for i in (1, 3, 5)])
+        for distance, color in layers
+    ]
+
+    rows = []
+    for y in range(size):
+        row = bytearray()
+        for x in range(size):
+            px, py = (x + 0.5) / size, (y + 0.5) / size
+            rgb, alpha = [0, 0, 0], 0.0
+            for distance, color in layers:
+                a = max(0.0, min(1.0, 0.5 - distance(px, py) * size))
+                total = a + alpha * (1 - a)
+                if total:
+                    rgb = [
+                        (c * a + below * alpha * (1 - a)) / total
+                        for c, below in zip(color, rgb)
+                    ]
+                alpha = total
+            row += bytes(round(c) for c in rgb) + bytes((round(alpha * 255),))
+        rows.append(bytes(row))
+    return rows
+
+
 def theme_icon_pixels(t, size):
     """
     RGBA rows of the theme icon part-way through its morph: t=0 is a sun,
-    t=1 a crescent moon. Shapes are signed distance fields, which gives
-    anti-aliased edges without supersampling.
+    t=1 a crescent moon.
     """
     e = t * t * (3 - 2 * t)  # ease in and out
 
@@ -200,27 +238,144 @@ def theme_icon_pixels(t, size):
     sun, moon = (
         [int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in (SUN, MOON)
     )
-    rgb = bytes(round(a + (b - a) * e) for a, b in zip(sun, moon))
+    color = "#" + "".join(
+        f"{round(a + (b - a) * e):02x}" for a, b in zip(sun, moon)
+    )
 
-    rows = []
-    for y in range(size):
-        row = bytearray()
-        for x in range(size):
-            px, py = (x + 0.5) / size, (y + 0.5) / size
-            d = max(
-                math.hypot(px - 0.5, py - 0.5) - disc,
-                0.30 - math.hypot(px - shadow_x, py - shadow_y)
+    def distance(px, py):
+        d = max(
+            math.hypot(px - 0.5, py - 0.5) - disc,
+            0.30 - math.hypot(px - shadow_x, py - shadow_y)
+        )
+        if ray_scale > 0.02:
+            for ray in rays:
+                d = min(
+                    d,
+                    _segment_distance(px, py, *ray) - 0.035 * ray_scale
+                )
+        return d
+
+    return sdf_pixels(size, [(distance, color)])
+
+
+def _strokes(*lines):
+    """Distance to lines through points, with round ends and joins."""
+    segments = [(a, b) for line in lines for a, b in zip(line, line[1:])]
+    return lambda px, py: min(
+        _segment_distance(px, py, *a, *b) for a, b in segments
+    ) - ICON_STROKE
+
+
+def _arc_points(x0, y0, radius, large, sweep, x1, y1, steps=8):
+    # A circular arc from its endpoints to its centre, as in the SVG spec
+    # (appendix B.2.4), then cut into short straight segments
+    mx, my = (x0 - x1) / 2, (y0 - y1) / 2
+    half_chord = math.hypot(mx, my)
+    radius = max(radius, half_chord)
+    k = math.sqrt(max(0.0, (radius / half_chord) ** 2 - 1))
+    if large == sweep:
+        k = -k
+    cx, cy = (x0 + x1) / 2 + k * my, (y0 + y1) / 2 - k * mx
+
+    start = math.atan2(y0 - cy, x0 - cx)
+    turn = math.atan2(y1 - cy, x1 - cx) - start
+    if sweep and turn < 0:
+        turn += 2 * math.pi
+    elif not sweep and turn > 0:
+        turn -= 2 * math.pi
+
+    return [
+        (
+            cx + radius * math.cos(start + turn * n / steps),
+            cy + radius * math.sin(start + turn * n / steps)
+        )
+        for n in range(1, steps + 1)
+    ]
+
+
+def svg_lines(path, grid=24):
+    """
+    The lines an SVG path draws, as points in the unit square. Only knows
+    the M, L, H, V, Z and circular A commands that icon sets use.
+    """
+    tokens = re.findall(r"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)", path)
+    lines, x, y, i, command = [], 0.0, 0.0, 0, None
+
+    def take(count):
+        nonlocal i
+        i += count
+        return [float(token) for token in tokens[i - count:i]]
+
+    while i < len(tokens):
+        if tokens[i].isalpha():
+            command = tokens[i]
+            i += 1
+        relative = command.islower()
+        dx, dy = (x, y) if relative else (0.0, 0.0)
+        kind = command.upper()
+
+        if kind == "M":
+            px, py = take(2)
+            x, y = px + dx, py + dy
+            lines.append([(x, y)])
+            # Further pairs after a move are lines
+            command = "l" if relative else "L"
+            continue
+        if kind == "Z":
+            x, y = lines[-1][0]
+            lines[-1].append((x, y))
+            continue
+
+        if kind == "L":
+            px, py = take(2)
+            x, y = px + dx, py + dy
+            points = [(x, y)]
+        elif kind == "H":
+            x = take(1)[0] + dx
+            points = [(x, y)]
+        elif kind == "V":
+            y = take(1)[0] + dy
+            points = [(x, y)]
+        elif kind == "A":
+            radius, _, _, large, sweep, px, py = take(7)
+            points = _arc_points(
+                x, y, radius, large, sweep, px + dx, py + dy
             )
-            if ray_scale > 0.02:
-                for ray in rays:
-                    d = min(
-                        d,
-                        _segment_distance(px, py, *ray) - 0.035 * ray_scale
-                    )
-            alpha = max(0.0, min(1.0, 0.5 - d * size))
-            row += rgb + bytes((round(alpha * 255),))
-        rows.append(bytes(row))
-    return rows
+            x, y = px + dx, py + dy
+        else:
+            raise ValueError(f"Unsupported path command {command}")
+        lines[-1].extend(points)
+
+    return [[(px / grid, py / grid) for px, py in line] for line in lines]
+
+
+# Lucide's folder-open (lucide.dev, ISC licence), on its 24px grid
+FOLDER_PATH = (
+    "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 "
+    "1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 "
+    "1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
+)
+
+
+def _ring(px, py):
+    return abs(math.hypot(px - 0.5, py - 0.5) - 0.44) - 0.055
+
+
+def _disc(px, py):
+    return math.hypot(px - 0.5, py - 0.5) - 0.495
+
+
+# Each icon is its layers, bottom first, painted in the colours given
+ICONS = {
+    "cross": (_strokes(((0.3, 0.3), (0.7, 0.7)), ((0.7, 0.3), (0.3, 0.7))),),
+    "folder": (_strokes(*svg_lines(FOLDER_PATH)),),
+    "box": (_ring,),
+    "ticked": (_disc, _strokes(((0.29, 0.52), (0.44, 0.66), (0.72, 0.36)))),
+}
+
+
+def icon_pixels(name, colors, size):
+    return sdf_pixels(size, list(zip(ICONS[name], colors)))
 
 
 def clip(text, limit):
@@ -255,6 +410,51 @@ def show_in_file_manager(path):
         subprocess.Popen(["xdg-open", os.path.dirname(path)])
 
 
+class IconCheckbox(ctk.CTkFrame):
+    """
+    A round checkbox ticked with the app's drawn icons, in place of
+    CTkCheckBox, whose tick comes from a font. It only shows what select()
+    and deselect() say, so a click just runs the command.
+    """
+
+    def __init__(self, app, parent, text, command):
+        super().__init__(parent, fg_color="transparent")
+        self.app = app
+        self.command = command
+        self.enabled = True
+
+        self.box = app._icon_label(self, "box", INPUT_BORDER)
+        self.box.pack(side="left")
+        self.text = None
+        if text:
+            self.text = app._label(self, text)
+            self.text.pack(side="left", padx=(6, 0))
+
+        def bind(widget):
+            tk.Misc.bind(widget, "<Button-1>", self._click, add="+")
+            for child in widget.winfo_children():
+                bind(child)
+
+        bind(self)
+        tk.Frame.configure(self, cursor="hand2")
+
+    def _click(self, _):
+        if self.enabled:
+            self.command()
+
+    def select(self):
+        self.app._set_icon(self.box, "ticked", PRIMARY, ON_PRIMARY)
+
+    def deselect(self):
+        self.app._set_icon(self.box, "box", INPUT_BORDER)
+
+    def set_enabled(self, enabled):
+        self.enabled = enabled
+        if self.text:
+            self.text.configure(text_color=INK if enabled else DIMMED)
+        tk.Frame.configure(self, cursor="hand2" if enabled else "")
+
+
 class LetterboxdToUwufufuApp:
     def __init__(self, root):
         self.root = root
@@ -273,6 +473,8 @@ class LetterboxdToUwufufuApp:
         self.theme = SAVED_THEME
         self.theme_icons = {}
         self.icon_animation = 0
+        self.icons = {}
+        self.icon_widgets = set()
         self._build_fonts()
 
         # An empty csv_paths means every file was removed, so only fall back
@@ -323,6 +525,7 @@ class LetterboxdToUwufufuApp:
         self._build_workbench()
         self._build_panel()
         self._refresh_files()
+        self._enable_file_drop()
         self._resize_window()
 
         # CustomTkinter recolours its own widgets when the theme changes;
@@ -362,27 +565,21 @@ class LetterboxdToUwufufuApp:
         self.small_font = ctk.CTkFont(family=family, size=12)
         self.link_font = strong(12)
         self.link_font.configure(underline=True)
-        self.icon_font = ctk.CTkFont(family=family, size=18)
         self.mono_font = ctk.CTkFont(family=MONO_FONT, size=12)
 
-        # The File Explorer folder and the eye from Windows' icon font (11,
-        # then 10); other systems get words instead
-        if "Segoe Fluent Icons" in families:
-            self.folder_icon = "\ue8b7"
-            symbols = "Segoe Fluent Icons"
-        elif "Segoe MDL2 Assets" in families:
-            self.folder_icon = "\ued25"
-            symbols = "Segoe MDL2 Assets"
-        else:
-            self.folder_icon = "Show"
-            symbols = None
-
+        # The eye from Windows' icon font (11, then 10); other systems get
+        # words instead
+        symbols = next(
+            (
+                name for name in ("Segoe Fluent Icons", "Segoe MDL2 Assets")
+                if name in families
+            ),
+            None
+        )
         if symbols:
-            self.folder_font = ctk.CTkFont(family=symbols, size=15)
             self.eye_icons = {False: "\ue890", True: "\ued1a"}  # View, Hide
             self.eye_font = ctk.CTkFont(family=symbols, size=16)
         else:
-            self.folder_font = self.small_font
             self.eye_icons = {False: "Show", True: "Hide"}
             self.eye_font = self.link_font
 
@@ -402,6 +599,11 @@ class LetterboxdToUwufufuApp:
 
         # Dark mode offers the sun to switch back, light mode the moon
         self._show_theme_icon(0 if index else THEME_ICON_FRAMES)
+
+        # Rows destroyed since leave their icons behind
+        self.icon_widgets = {w for w in self.icon_widgets if w.winfo_exists()}
+        for widget in self.icon_widgets:
+            self._paint_icon(widget, index)
 
         if os.name == "nt":
             # Paint the Windows 11 title bar with the window background
@@ -464,6 +666,68 @@ class LetterboxdToUwufufuApp:
             warnings.simplefilter("ignore")
             self.theme_btn.configure(image=self._theme_icon(index))
 
+    # ---- Icons --------------------------------------------------------------
+
+    def _icon(self, name, colors, index=None):
+        """A drawn icon (see ICONS) in the colours of a theme, by default
+        the current one."""
+        if index is None:
+            index = 1 if ctk.get_appearance_mode() == "Dark" else 0
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.root)
+        size = round(ICON_SIZE * scaling)
+        shades = tuple(color[index] for color in colors)
+
+        if (name, shades, size) not in self.icons:
+            self.icons[name, shades, size] = png_image(
+                size, icon_pixels(name, shades, size)
+            )
+        return self.icons[name, shades, size]
+
+    def _paint_icon(self, widget, index=None):
+        name, colors = widget.drawn_icon
+        # Already rendered at the scaled size, as in _show_theme_icon
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            widget.configure(image=self._icon(name, colors, index))
+
+    def _set_icon(self, widget, name, *colors):
+        # Remembered, so _apply_theme can repaint it in the new theme
+        widget.drawn_icon = name, colors
+        self.icon_widgets.add(widget)
+        self._paint_icon(widget)
+
+    def _icon_label(self, parent, name, *colors):
+        # Created with an image, the only way CustomTkinter lays one out
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            label = ctk.CTkLabel(
+                parent,
+                text="",
+                image=self._icon(name, colors),
+                width=0,
+                height=0
+            )
+        self._set_icon(label, name, *colors)
+        return label
+
+    def _icon_button(self, parent, name, command, color=MUTED, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            button = ctk.CTkButton(
+                parent,
+                text="",
+                image=self._icon(name, (color,)),
+                command=command,
+                width=32,
+                height=32,
+                corner_radius=16,
+                fg_color="transparent",
+                hover_color=TRACK,
+                **kwargs
+            )
+        self._set_icon(button, name, color)
+        return button
+
     # ---- Shared widgets -----------------------------------------------------
 
     def _label(self, parent, text, font=None, color=INK, **kwargs):
@@ -479,8 +743,8 @@ class LetterboxdToUwufufuApp:
 
     def _segmented(self, parent, values, variable, command=None, track=TRACK,
                    track_hover=TRACK_HOVER):
-        # A pill track; the chosen segment takes the soft green fill, since
-        # the bright green is kept for primary actions
+        # A pill track; the chosen segment takes a soft grey fill, since
+        # solid ink is kept for primary actions
         selector = ctk.CTkSegmentedButton(
             parent,
             values=values,
@@ -529,25 +793,7 @@ class LetterboxdToUwufufuApp:
         return entry
 
     def _checkbox(self, parent, text, command):
-        # No hover effect: CustomTkinter fills an unticked box with the hover
-        # colour, which looks ticked
-        return ctk.CTkCheckBox(
-            parent,
-            text=text,
-            command=command,
-            width=0,
-            checkbox_width=18,
-            checkbox_height=18,
-            corner_radius=9,  # half the size, so the box is a circle
-            border_width=2,
-            hover=False,
-            fg_color=PRIMARY,
-            border_color=INPUT_BORDER,
-            checkmark_color=ON_PRIMARY,
-            text_color=INK,
-            text_color_disabled=DIMMED,
-            font=self.body_font
-        )
+        return IconCheckbox(self, parent, text, command)
 
     # ---- Workbench ----------------------------------------------------------
 
@@ -668,14 +914,12 @@ class LetterboxdToUwufufuApp:
         self.file_list = ctk.CTkScrollableFrame(
             self.file_view,
             corner_radius=0,
-            fg_color="transparent",
-            scrollbar_button_color=SCROLLBAR,
-            scrollbar_button_hover_color=INPUT_BORDER
+            fg_color="transparent"
         )
-        # Re-check the scrollbar when the rows or the space for them change
-        self.file_list.bind("<Configure>", self._fit_scrollbar, add="+")
+        # Re-check when the rows or the space for them change
+        self.file_list.bind("<Configure>", self._fit_file_list, add="+")
         self.file_list._parent_canvas.bind(
-            "<Configure>", self._fit_scrollbar, add="+"
+            "<Configure>", self._fit_file_list, add="+"
         )
 
         # Stands in for the list until a file is added
@@ -690,7 +934,8 @@ class LetterboxdToUwufufuApp:
         self._label(message, "No CSV files yet", self.subtitle_font).pack()
         self._label(
             message,
-            "Click here or on Add CSV to choose\nyour Letterboxd exports.",
+            "Drag your Letterboxd exports here,\n"
+            "or click to choose them.",
             self.body_font,
             MUTED,
             justify="center"
@@ -704,6 +949,56 @@ class LetterboxdToUwufufuApp:
             )
         )
 
+        # Covers the list while files are dragged over it
+        self.drop_overlay = ctk.CTkFrame(
+            self.file_view,
+            corner_radius=24,
+            fg_color=CARD_HOVER
+        )
+        message = ctk.CTkFrame(self.drop_overlay, fg_color="transparent")
+        message.place(relx=0.5, rely=0.5, anchor="center")
+
+        self._label(message, "Drop to add", self.subtitle_font).pack()
+        self._label(
+            message,
+            "Only CSV files are added.",
+            self.body_font,
+            MUTED,
+            justify="center"
+        ).pack(pady=(8, 0))
+
+    def _enable_file_drop(self):
+        # tkdnd ships builds for the common systems only; elsewhere files
+        # can still be added with Add CSV
+        try:
+            TkinterDnD._require(self.root)
+        except Exception:
+            return
+
+        # A drop on a row or the empty state reaches the view holding them
+        self.file_view.drop_target_register(DND_FILES)
+        self.file_view.dnd_bind("<<DropEnter>>", self._drag_enter)
+        self.file_view.dnd_bind("<<DropLeave>>", self._drag_leave)
+        self.file_view.dnd_bind("<<Drop>>", self._drop_files)
+
+    def _drag_enter(self, event):
+        self.drop_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.drop_overlay.lift()
+        return event.action
+
+    def _drag_leave(self, event):
+        self.drop_overlay.place_forget()
+        return event.action
+
+    def _drop_files(self, event):
+        self.drop_overlay.place_forget()
+        # Paths with spaces arrive wrapped in braces, as a Tcl list
+        self.add_files(
+            path for path in self.root.tk.splitlist(event.data)
+            if path.lower().endswith(".csv") and os.path.isfile(path)
+        )
+        return COPY
+
     def _show_view(self, name):
         self.view.set(name)
         for view_name, widget in self.views.items():
@@ -712,14 +1007,13 @@ class LetterboxdToUwufufuApp:
             else:
                 widget.pack_forget()
 
-    def _fit_scrollbar(self, _=None):
-        # CTkScrollableFrame (5.2.2) always shows its scrollbar, so hide it
-        # while every row fits
+    def _fit_file_list(self, _=None):
+        # The list scrolls with the mouse wheel only. CTkScrollableFrame
+        # (5.2.2) shows its scrollbar again when it lays itself out, so hide
+        # it each time
+        self.file_list._scrollbar.grid_remove()
         canvas = self.file_list._parent_canvas
-        if self.file_list.winfo_reqheight() > canvas.winfo_height():
-            self.file_list._scrollbar.grid()
-        else:
-            self.file_list._scrollbar.grid_remove()
+        if self.file_list.winfo_reqheight() <= canvas.winfo_height():
             canvas.yview_moveto(0)
 
     def _refresh_files(self):
@@ -789,9 +1083,8 @@ class LetterboxdToUwufufuApp:
         row.pack(fill="x", pady=(0, ROW_GAP))
         row.grid_columnconfigure(1, weight=1)
 
-        # The box keeps 6px free on its right for a label it doesn't have
         check = self._checkbox(row, "", lambda: self.toggle_csv(path))
-        check.grid(row=0, column=0, rowspan=2, padx=(ROW_PADDING, 6))
+        check.grid(row=0, column=0, rowspan=2, padx=(ROW_PADDING, 12))
 
         name = self._label(
             row, clip(os.path.basename(path), 40), self.label_font
@@ -813,33 +1106,18 @@ class LetterboxdToUwufufuApp:
             DANGER if problem else MUTED
         ).grid(row=0, column=2, rowspan=2, padx=(12, 0))
 
-        open_btn = ctk.CTkButton(
+        exists = os.path.isfile(path)
+        open_btn = self._icon_button(
             row,
-            text=self.folder_icon,
-            command=lambda: self.show_csv(path),
-            state=tk.NORMAL if os.path.isfile(path) else tk.DISABLED,
-            width=32,
-            height=32,
-            corner_radius=16,
-            fg_color="transparent",
-            hover_color=TRACK,
-            text_color=MUTED,
-            text_color_disabled=PREVIEW_TEXT,
-            font=self.folder_font
+            "folder",
+            lambda: self.show_csv(path),
+            MUTED if exists else PREVIEW_TEXT,
+            state=tk.NORMAL if exists else tk.DISABLED
         )
         open_btn.grid(row=0, column=3, rowspan=2, padx=(12, 0))
 
-        remove_btn = ctk.CTkButton(
-            row,
-            text="×",
-            command=lambda: self.remove_csv(path),
-            width=32,
-            height=32,
-            corner_radius=16,
-            fg_color="transparent",
-            hover_color=TRACK,
-            text_color=MUTED,
-            font=self.icon_font
+        remove_btn = self._icon_button(
+            row, "cross", lambda: self.remove_csv(path)
         )
         remove_btn.grid(row=0, column=4, rowspan=2, padx=(4, 12))
 
@@ -884,10 +1162,15 @@ class LetterboxdToUwufufuApp:
                 ("All Files", "*.*")
             ]
         )
+        self.add_files(filenames)
 
+    def add_files(self, filenames):
         # New files start unselected, so adding one never changes what
-        # already goes into the tournament
+        # already goes into the tournament. Paths are kept with forward
+        # slashes, as the file dialog gives them, so a dropped file already
+        # in the list isn't added twice
         for filename in filenames:
+            filename = Path(filename).as_posix()
             if filename not in self.csv_paths:
                 self.csv_paths.append(filename)
 
@@ -938,14 +1221,11 @@ class LetterboxdToUwufufuApp:
         count = len(self._selected_paths())
         total = len(self.csv_paths)
 
-        # A click ticks the box by itself, so follow the selection instead
         if total and count == total:
             self.select_all_box.select()
         else:
             self.select_all_box.deselect()
-        self.select_all_box.configure(
-            state=tk.NORMAL if total else tk.DISABLED
-        )
+        self.select_all_box.set_enabled(bool(total))
 
         self.file_count_label.configure(
             text=f"{count} of {total} selected" if total else ""
