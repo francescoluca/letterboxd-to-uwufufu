@@ -388,6 +388,17 @@ def pointer_inside(widget):
     return inside == str(widget) or inside.startswith(f"{widget}.")
 
 
+def configure_changed(widget, **options):
+    """Configure a widget only where a value differs. CustomTkinter redraws
+    on every configure(), which shows as a flash when clicking quickly."""
+    changed = {
+        key: value for key, value in options.items()
+        if widget.cget(key) != value
+    }
+    if changed:
+        widget.configure(**changed)
+
+
 def save_setting(key, value):
     lines = []
     if CONFIG_FILE.exists():
@@ -443,12 +454,19 @@ class IconCheckbox(ctk.CTkFrame):
             self.command()
 
     def select(self):
-        self.app._set_icon(self.box, "ticked", PRIMARY, ON_PRIMARY)
+        self._show("ticked", PRIMARY, ON_PRIMARY)
 
     def deselect(self):
-        self.app._set_icon(self.box, "box", INPUT_BORDER)
+        self._show("box", INPUT_BORDER)
+
+    def _show(self, name, *colors):
+        # Repainting an icon that already shows this redraws it for nothing
+        if getattr(self.box, "drawn_icon", None) != (name, colors):
+            self.app._set_icon(self.box, name, *colors)
 
     def set_enabled(self, enabled):
+        if enabled == self.enabled:
+            return
         self.enabled = enabled
         if self.text:
             self.text.configure(text_color=INK if enabled else DIMMED)
@@ -1140,8 +1158,10 @@ class LetterboxdToUwufufuApp:
         else:
             check.deselect()
 
-        row.configure(fg_color=self._row_fill(path, pointer_inside(row)))
-        name.configure(text_color=INK if selected else MUTED)
+        configure_changed(
+            row, fg_color=self._row_fill(path, pointer_inside(row))
+        )
+        configure_changed(name, text_color=INK if selected else MUTED)
 
     def _row_fill(self, path, hover):
         # Rows are borderless cards that darken a little on hover
@@ -1227,7 +1247,8 @@ class LetterboxdToUwufufuApp:
             self.select_all_box.deselect()
         self.select_all_box.set_enabled(bool(total))
 
-        self.file_count_label.configure(
+        configure_changed(
+            self.file_count_label,
             text=f"{count} of {total} selected" if total else ""
         )
 
@@ -1239,14 +1260,17 @@ class LetterboxdToUwufufuApp:
             summary = (
                 f"{count} of {total} file{'s' if total != 1 else ''} selected"
             )
-        self.files_summary.configure(
+        configure_changed(
+            self.files_summary,
             text=summary,
             text_color=INK if count else DIMMED
         )
 
-        self.mode_selector.configure(
-            state=tk.NORMAL if count > 1 else tk.DISABLED
-        )
+        # CTkSegmentedButton can't report its state, so remember it
+        state = tk.NORMAL if count > 1 else tk.DISABLED
+        if getattr(self, "mode_state", None) != state:
+            self.mode_state = state
+            self.mode_selector.configure(state=state)
         self._update_mode_help()
 
     # ---- Tool panel ---------------------------------------------------------
@@ -1402,7 +1426,7 @@ class LetterboxdToUwufufuApp:
             text = MODE_HELP[self._selected_mode()]
         else:
             text = "Select two or more files to combine them."
-        self.mode_help.configure(text=text)
+        configure_changed(self.mode_help, text=text)
 
     def _selected_quality(self):
         return next(
