@@ -18,8 +18,6 @@ To cancel a running conversion, click **Stop**. If the draft tournament was alre
 Movies whose poster can't be found are left out of the tournament. They are listed at the end of the **Activity** log so you can add them manually when you edit the tournament.
 
 #### Choosing and combining CSV files
-Click **Add CSV** to add Letterboxd CSV files to the **Files** list (you can pick several at once). New files start unselected: tick the ones you want in the tournament, or use **Select all**. Only the selected files are used, so you can keep several exports in the list and pick a different combination each time.
-
 Each file shows the Letterboxd account it belongs to, taken from the name of the folder a Letterboxd export unzips to (`letterboxd-<username>-<date>-utc`). Files saved anywhere else show `Letterboxd account: unknown`.
 
 When two or more files are selected, choose how to combine them under **Settings**:
@@ -27,6 +25,17 @@ When two or more files are selected, choose how to combine them under **Settings
 - **Intersection**: only the movies present in all the selected files.
 
 Movies are matched by title and year, and each movie appears only once in the tournament.
+
+#### Using files that aren't Letterboxd exports
+The files don't have to come from Letterboxd. Any CSV works as long as it follows the same structure as a Letterboxd export:
+
+![Letterboxd export example](assets/letterboxd-export-example.png)
+
+- The first column can hold anything you like (a position, a rank, a date, ...). It is ignored, so it doesn't have to be the date.
+- The movie **title** goes in the second column and the **year** in the third.
+- The last column (`Letterboxd URI`) is optional and can be left out.
+
+Rows missing a title or a year are skipped. Files that don't come from a Letterboxd export show `Letterboxd account: unknown`.
 
 ### Option B: Run from Source Code
 If you want to run or modify the source code locally, you will need your own TMDb API key.
