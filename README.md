@@ -35,7 +35,7 @@ The files don't have to come from Letterboxd. Any CSV works as long as it follow
 - The movie **title** goes in the second column and the **year** in the third.
 - The last column (`Letterboxd URI`) is optional and can be left out.
 
-Rows missing a title or a year are skipped. Files that don't come from a Letterboxd export show `Letterboxd account: unknown`.
+Files that don't come from a Letterboxd export show `Letterboxd account: unknown`.
 
 ### Option B: Run from Source Code
 If you want to run or modify the source code locally, you will need your own TMDb API key.
