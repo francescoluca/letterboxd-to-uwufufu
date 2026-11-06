@@ -86,8 +86,10 @@ WARNING = ("#b86700", "#ffd11a")
 DANGER = ("#d03238", "#ff6b70")
 DANGER_SUBTLE = ("#e8ebe6", "#320707")
 DANGER_HOVER = ("#dde1da", "#451010")
-ICON_TILE = "#0e0f0c"
-ICON_MARK = "#ffffff"
+LOGO_SIZES = (256, 128, 64, 48, 32, 24, 16)
+# The logo beside the title, prerendered for the common display scalings
+LOGO_SIZE = 76
+HEADER_LOGO_SIZES = (76, 95, 114, 152)
 SUN = "#e8ebe6"
 MOON = "#0e0f0c"
 
@@ -102,7 +104,23 @@ ICON_SIZE = 18
 ICON_STROKE = 0.045  # half a stroke's width
 
 MONO_FONT = {"nt": "Consolas"}.get(os.name, "Menlo")
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_CAPTION_COLOR = 35
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWCP_ROUND = 2
+GWL_STYLE = -16
+WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
+WS_SYSMENU = 0x00080000
+WS_MINIMIZEBOX = 0x00020000
+WS_MAXIMIZEBOX = 0x00010000
+SWP_FRAMECHANGED_FLAGS = 0x0020 | 0x0002 | 0x0001 | 0x0004 | 0x0010
+SWP_RESIZE_FLAGS = 0x0002 | 0x0004 | 0x0010  # no move, no z-order, no focus
+CAPTION_BUTTON_WIDTH = 46
+CAPTION_BUTTON_HEIGHT = 32
+CLOSE_HOVER = "#c42b1c"
+WM_NCLBUTTONDOWN = 0x00A1
+HTCAPTION = 2
 
 PRIMARY_STYLE = {
     "fg_color": PRIMARY,
@@ -134,25 +152,17 @@ class ConversionStopped(Exception):
     pass
 
 
-def render_icon(size=64, radius=14):
-    """A tournament bracket, white on an ink rounded tile."""
-    image = tk.PhotoImage(width=size, height=size)
+def asset(name):
+    # PyInstaller unpacks bundled files next to its bootloader
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return str(root / "assets" / name)
 
-    for y in range(size):
-        # Inset each row near the top and bottom to round the corners
-        dy = max(radius - y, y - (size - 1 - radius), 0)
-        inset = radius - int((radius ** 2 - dy ** 2) ** 0.5) if dy else 0
-        image.put(ICON_TILE, to=(inset, y, size - inset, y + 1))
 
-    for box in (
-        (14, 17, 35, 22),
-        (14, 42, 35, 47),
-        (30, 17, 35, 47),
-        (30, 30, 50, 35)
-    ):
-        image.put(ICON_MARK, to=box)
-
-    return image
+def load_logos():
+    """The app logo at the sizes the window icon is made of."""
+    return [
+        tk.PhotoImage(file=asset(f"icon-{size}.png")) for size in LOGO_SIZES
+    ]
 
 
 def png_image(size, rows):
@@ -479,9 +489,12 @@ class LetterboxdToUwufufuApp:
         self.root.title("Letterboxd to UwUFUFU Converter")
         self.root.resizable(False, False)
         self.root.configure(fg_color=PAPER)
+        # Stops CustomTkinter hiding and showing the window on a theme change
+        # to repaint the title bar (see _apply_theme)
+        self.root._deactivate_windows_window_header_manipulation = True
 
-        self.icon = render_icon()
-        self.root.iconphoto(True, self.icon)
+        self.logos = load_logos()
+        self.root.iconphoto(True, *self.logos)
         # Calling iconbitmap() stops CustomTkinter from swapping in its logo
         self.root.iconbitmap()
 
@@ -542,8 +555,10 @@ class LetterboxdToUwufufuApp:
 
         self._build_workbench()
         self._build_panel()
+        self._build_window_controls()
         self._refresh_files()
         self._enable_file_drop()
+        self._remove_title_bar()
         self._resize_window()
 
         # CustomTkinter recolours its own widgets when the theme changes;
@@ -594,6 +609,11 @@ class LetterboxdToUwufufuApp:
             ),
             None
         )
+        self.caption_font = (
+            ctk.CTkFont(family=symbols, size=10) if symbols else self.link_font
+        )
+        # Minimise and close, the glyphs Windows 11 draws in its title bar
+        self.caption_glyphs = ("", "") if symbols else ("–", "✕")
         if symbols:
             self.eye_icons = {False: "\ue890", True: "\ued1a"}  # View, Hide
             self.eye_font = ctk.CTkFont(family=symbols, size=16)
@@ -604,8 +624,149 @@ class LetterboxdToUwufufuApp:
     def _resize_window(self):
         self.root.update_idletasks()
         scaling = ctk.ScalingTracker.get_window_scaling(self.root)
+        if self.frameless:
+            # Tk still counts the title bar and border it was told were
+            # there, so size the window in pixels instead
+            ctypes.windll.user32.SetWindowPos(
+                self._hwnd(), 0, 0, 0,
+                round(WINDOW_WIDTH * scaling), self.root.winfo_reqheight(),
+                SWP_RESIZE_FLAGS
+            )
+            return
         height = self.root.winfo_reqheight() / scaling
         self.root.geometry(f"{WINDOW_WIDTH}x{round(height)}")
+
+    # ---- Window frame -------------------------------------------------------
+
+    def _hwnd(self):
+        return ctypes.windll.user32.GetParent(self.root.winfo_id())
+
+    def _remove_title_bar(self):
+        """
+        Drop the Windows title bar, which would repeat the name shown in the
+        header. The window keeps its taskbar button and rounded corners; the
+        buttons in the corner minimise and close it and the header drags it.
+        """
+        self.frameless = False
+        if os.name != "nt":
+            return
+
+        try:
+            # Tk keeps a fixed window at the size it had, so lift that and
+            # take the resize border off the window style instead
+            self.root.resizable(True, True)
+            user32 = ctypes.windll.user32
+            hwnd = self._hwnd()
+            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX)
+            style |= WS_SYSMENU | WS_MINIMIZEBOX
+            user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED_FLAGS)
+
+            corners = ctypes.c_int(DWMWCP_ROUND)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(corners),
+                ctypes.sizeof(corners)
+            )
+            # A thin frame brings back the drop shadow
+            margins = (ctypes.c_int * 4)(0, 0, 0, 1)
+            ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
+                hwnd, ctypes.byref(margins)
+            )
+        except Exception:
+            return
+
+        self.frameless = True
+        # Make room above the card for the buttons, which sit on the canvas
+        self.panel.pack_configure(
+            pady=(CAPTION_BUTTON_HEIGHT, WORKBENCH_PADDING)
+        )
+        self._build_caption_buttons()
+        # The empty canvas drags the window too. Every widget has the window
+        # in its bindtags, so only take clicks on the window itself
+        self.workbench.bind("<ButtonPress-1>", self._start_window_drag, add="+")
+        self.root.bind(
+            "<ButtonPress-1>",
+            lambda e: e.widget is self.root and self._start_window_drag(e),
+            add="+"
+        )
+
+    def _enable_window_drag(self, widget):
+        """Let the window be dragged by this widget and what is inside it."""
+        if os.name != "nt":
+            return
+        widget.bind("<ButtonPress-1>", self._start_window_drag, add="+")
+        for child in widget.winfo_children():
+            self._enable_window_drag(child)
+
+    def _start_window_drag(self, event):
+        ctypes.windll.user32.ReleaseCapture()
+        # Posted, not sent: Windows runs the move inside this call, and Tk
+        # calling back into Python from in there crashes it
+        ctypes.windll.user32.PostMessageW(
+            self._hwnd(), WM_NCLBUTTONDOWN, HTCAPTION, 0
+        )
+
+    def _build_window_controls(self):
+        """The theme button, in the top right of the tool card."""
+        # The button only lays out an image it is created with, so start
+        # with the icon for the current theme (see _show_theme_icon)
+        dark = ctk.get_appearance_mode() == "Dark"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.theme_btn = ctk.CTkButton(
+                self.panel,
+                text="",
+                image=self._theme_icon(0 if dark else THEME_ICON_FRAMES),
+                command=self.toggle_theme,
+                width=32,
+                height=32,
+                corner_radius=16,
+                fg_color="transparent",
+                hover_color=TRACK
+            )
+        self.theme_btn.place(
+            relx=1.0, x=-PANEL_PADDING + 6, y=PANEL_PADDING - 6, anchor="ne"
+        )
+
+    def _build_caption_buttons(self):
+        """Minimise and close in the top right corner, like Windows draws."""
+        glyphs = self.caption_glyphs
+        for column, (glyph, command, hover, hover_text) in enumerate((
+            (glyphs[0], self.root.iconify, TRACK_HOVER, INK),
+            (glyphs[1], self.root.destroy, CLOSE_HOVER, "#ffffff"),
+        )):
+            button = ctk.CTkButton(
+                self.root,
+                text=glyph,
+                font=self.caption_font,
+                command=command,
+                width=CAPTION_BUTTON_WIDTH,
+                height=CAPTION_BUTTON_HEIGHT,
+                corner_radius=0,
+                fg_color="transparent",
+                hover_color=hover,
+                text_color=INK
+            )
+            # CustomTkinter has no hover colour for the text. Setting it with
+            # configure() would redraw the button and lose the hover fill, so
+            # it goes straight to the label
+            for event, color in (("<Enter>", hover_text), ("<Leave>", INK)):
+                button.bind(
+                    event,
+                    lambda _, b=button, c=color: b._text_label.configure(
+                        fg=b._apply_appearance_mode(c)
+                    ),
+                    add="+"
+                )
+            button.place(
+                relx=1.0,
+                x=-CAPTION_BUTTON_WIDTH * (1 - column),
+                y=0,
+                anchor="ne"
+            )
 
     # ---- Theme --------------------------------------------------------------
 
@@ -624,26 +785,52 @@ class LetterboxdToUwufufuApp:
             self._paint_icon(widget, index)
 
         if os.name == "nt":
-            # Paint the Windows 11 title bar with the window background
+            # Paint the Windows 11 title bar with the window background and
+            # give it light or dark buttons and text. CustomTkinter does the
+            # latter by hiding and showing the window, which makes its taskbar
+            # button jump, so it is turned off in __init__ and done here
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
                 hex_color = PAPER[index]
                 color = ctypes.c_int(int(
                     hex_color[5:7] + hex_color[3:5] + hex_color[1:3], 16
                 ))
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                dark = ctypes.c_int(index)
+                dwm = ctypes.windll.dwmapi
+                dwm.DwmSetWindowAttribute(
                     hwnd,
                     DWMWA_CAPTION_COLOR,
                     ctypes.byref(color),
                     ctypes.sizeof(color)
                 )
+                dwm.DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    ctypes.byref(dark),
+                    ctypes.sizeof(dark)
+                )
             except Exception:
                 pass
+
+    def _set_appearance_mode(self, mode):
+        """
+        Switch the theme painting the window once. After recolouring each
+        widget CustomTkinter flushes every pending redraw, so with over a
+        hundred widgets the window repaints that many times, piece by piece,
+        and shows half old and half new colours along the way.
+        """
+        flush = tk.Misc.update_idletasks
+        tk.Misc.update_idletasks = lambda widget: None
+        try:
+            ctk.set_appearance_mode(mode)
+        finally:
+            tk.Misc.update_idletasks = flush
+        self.root.update_idletasks()
 
     def toggle_theme(self):
         to_dark = ctk.get_appearance_mode() == "Light"
         self.theme = "dark" if to_dark else "light"
-        ctk.set_appearance_mode(self.theme)
+        self._set_appearance_mode(self.theme)
         save_setting("theme", self.theme)
 
         # Switch first so the click feels instant, then morph the icon from
@@ -713,6 +900,25 @@ class LetterboxdToUwufufuApp:
         widget.drawn_icon = name, colors
         self.icon_widgets.add(widget)
         self._paint_icon(widget)
+
+    def _logo_image(self):
+        """The header logo prerendered nearest to the display scaling."""
+        scaling = ctk.ScalingTracker.get_widget_scaling(self.root)
+        wanted = LOGO_SIZE * scaling
+        size = min(HEADER_LOGO_SIZES, key=lambda n: abs(n - wanted))
+        if not hasattr(self, "header_logos"):
+            self.header_logos = {}
+        if size not in self.header_logos:
+            self.header_logos[size] = tk.PhotoImage(
+                file=asset(f"logo-{size}.png")
+            )
+        return self.header_logos[size]
+
+    def _image_label(self, parent, image):
+        # Created with an image, the only way CustomTkinter lays one out
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return ctk.CTkLabel(parent, text="", image=image, width=0, height=0)
 
     def _icon_label(self, parent, name, *colors):
         # Created with an image, the only way CustomTkinter lays one out
@@ -821,35 +1027,21 @@ class LetterboxdToUwufufuApp:
         hero = ctk.CTkFrame(self.workbench, fg_color="transparent")
         hero.pack(fill="x", padx=WORKBENCH_PADDING, pady=(WORKBENCH_PADDING, 0))
 
+        self.logo_label = self._image_label(hero, self._logo_image())
+        self.logo_label.grid(row=0, column=0, rowspan=2, padx=(0, 16))
+
         self._label(hero, "Letterboxd to UwUFUFU", self.title_font).grid(
-            row=0, column=0, sticky="w"
+            row=0, column=1, sticky="sw"
         )
         self._label(
             hero,
             "Build a UwUFUFU bracket tournament from your "
-            "Letterboxd CSV exports.",
+            "Letterboxd CSV exports",
             self.body_font,
             MUTED
-        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
-        hero.grid_columnconfigure(0, weight=1)
-
-        # The button only lays out an image it is created with, so start
-        # with the icon for the current theme (see _show_theme_icon)
-        dark = ctk.get_appearance_mode() == "Dark"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.theme_btn = ctk.CTkButton(
-                hero,
-                text="",
-                image=self._theme_icon(0 if dark else THEME_ICON_FRAMES),
-                command=self.toggle_theme,
-                width=36,
-                height=36,
-                corner_radius=18,
-                fg_color=CARD,
-                hover_color=TRACK_HOVER
-            )
-        self.theme_btn.grid(row=0, column=1, sticky="e")
+        ).grid(row=1, column=1, sticky="nw", pady=(8, 0))
+        hero.grid_columnconfigure(1, weight=1)
+        self._enable_window_drag(hero)
 
         top = ctk.CTkFrame(self.workbench, fg_color="transparent")
         top.pack(
