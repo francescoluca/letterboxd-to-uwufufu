@@ -17,17 +17,21 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import customtkinter as ctk
+import keyring
+from keyring.errors import KeyringError, PasswordDeleteError
 from dotenv import load_dotenv
-from cryptography.fernet import Fernet
 from tkinterdnd2 import TkinterDnD, DND_FILES, COPY
 
 from src import tmdb, uwufufu, parser
-from src.config import ENCRYPTION_KEY
 
 
 CONFIG_FILE = Path.home() / ".uwufufu_converter.env"
 load_dotenv(CONFIG_FILE)
-cipher = Fernet(ENCRYPTION_KEY)
+
+# The password is kept in the system's credential store (Credential Manager
+# on Windows, Keychain on macOS, Secret Service on Linux), filed under this
+# name and the account email
+KEYRING_SERVICE = "letterboxd-to-uwufufu"
 
 CSV_PATHS_SEPARATOR = "|"
 START_TEXT = "Create tournament"
@@ -419,6 +423,47 @@ def save_setting(key, value):
     CONFIG_FILE.write_text("\n".join(lines + [f"{key}={value}"]) + "\n")
 
 
+def remove_old_password():
+    """Delete the password older versions saved in the settings file.
+
+    It was encrypted with a key shipped inside the app, so anyone with the
+    app could decrypt it. It is dropped, not moved to the credential store:
+    the password is asked for once more.
+    """
+    if not CONFIG_FILE.exists():
+        return
+    lines = CONFIG_FILE.read_text().splitlines()
+    kept = [line for line in lines if not line.startswith("password=")]
+    if kept != lines:
+        CONFIG_FILE.write_text("\n".join(kept) + "\n" if kept else "")
+    os.environ.pop("password", None)
+
+
+def load_password(email):
+    try:
+        return keyring.get_password(KEYRING_SERVICE, email)
+    except KeyringError:
+        return None
+
+
+def store_password(email, password):
+    """Save the password in the credential store. False if there is none."""
+    try:
+        keyring.set_password(KEYRING_SERVICE, email, password)
+        return True
+    except KeyringError:
+        return False
+
+
+def forget_password(email):
+    try:
+        keyring.delete_password(KEYRING_SERVICE, email)
+    except PasswordDeleteError:
+        pass  # Nothing was saved for this email
+    except KeyringError:
+        pass
+
+
 def show_in_file_manager(path):
     """Open the folder holding a file, with the file selected if possible."""
     if os.name == "nt":
@@ -534,6 +579,11 @@ class LetterboxdToUwufufuApp:
         if quality not in tmdb.POSTER_QUALITIES:
             quality = tmdb.STANDARD_QUALITY
         self.poster_quality = ctk.StringVar(value=QUALITY_LABELS[quality])
+
+        remove_old_password()
+        # The email the stored password is filed under, so it can be deleted
+        # when the email changes
+        self.saved_email = os.getenv("email") or ""
 
         self.workbench = ctk.CTkFrame(self.root, fg_color="transparent")
         self.workbench.pack(side="left", fill="y")
@@ -1552,14 +1602,9 @@ class LetterboxdToUwufufuApp:
             padx=(round(12 * scaling), round(44 * scaling))
         )
 
-        if encrypted := os.getenv("password"):
-            try:
-                self.pass_entry.insert(
-                    0,
-                    cipher.decrypt(encrypted.encode()).decode()
-                )
-            except Exception:
-                pass
+        if self.saved_email:
+            if password := load_password(self.saved_email):
+                self.pass_entry.insert(0, password)
 
         self.start_btn = ctk.CTkButton(
             content,
@@ -1630,6 +1675,18 @@ class LetterboxdToUwufufuApp:
         self.quality_help.configure(
             text=QUALITY_HELP[self._selected_quality()]
         )
+
+    def _save_password(self, email, password):
+        if self.saved_email and self.saved_email != email:
+            forget_password(self.saved_email)
+        self.saved_email = email
+
+        if not store_password(email, password):
+            self.log(
+                "Couldn't save the password: this system has no credential "
+                "store. It will be asked for next time.",
+                "warn"
+            )
 
     def _toggle_password(self):
         self.password_visible = not self.password_visible
@@ -1724,11 +1781,10 @@ class LetterboxdToUwufufuApp:
         self._clear_log()
         self._show_view("Activity")
 
-        encrypted_password = cipher.encrypt(password.encode()).decode()
+        self._save_password(email, password)
 
         CONFIG_FILE.write_text(
             f"email={email}\n"
-            f"password={encrypted_password}\n"
             f"csv_paths={CSV_PATHS_SEPARATOR.join(self.csv_paths)}\n"
             f"csv_selected={CSV_PATHS_SEPARATOR.join(csv_paths)}\n"
             f"csv_mode={mode}\n"
